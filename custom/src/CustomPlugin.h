@@ -13,6 +13,7 @@ class AssistantClient;
 class CustomOptions;
 class CustomPlugin;
 class CustomSettings;
+class ModelRegistry;
 class QQmlApplicationEngine;
 class TelemetryWsRelay;
 
@@ -96,6 +97,7 @@ private:
     CustomOptions *_options = nullptr;
     AssistantClient *_assistant = nullptr;
     TelemetryWsRelay *_wsRelay = nullptr;
+    ModelRegistry *_modelRegistry = nullptr;
     QQmlApplicationEngine *_qmlEngine = nullptr;
     class CustomOverrideInterceptor *_urlInterceptor = nullptr;
     QVariantList _customSettingsList; // Not to be mixed up with QGCCorePlugin implementation

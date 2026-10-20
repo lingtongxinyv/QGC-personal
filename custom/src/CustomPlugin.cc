@@ -1,5 +1,6 @@
 #include "CustomPlugin.h"
 #include "AssistantClient.h"
+#include "ModelRegistry.h"
 #include "TelemetryWsRelay.h"
 #include "PerimeterScanComplexItem.h"
 #include "PerimeterScanPlanCreator.h"
@@ -39,6 +40,7 @@ CustomPlugin::CustomPlugin(QObject *parent)
     , _options(new CustomOptions(this, this))
     , _assistant(new AssistantClient(this))
     , _wsRelay(new TelemetryWsRelay(this))
+    , _modelRegistry(new ModelRegistry(this))
 {
     qCDebug(CustomLog) << this;
 
@@ -262,6 +264,11 @@ QQmlApplicationEngine* CustomPlugin::createQmlApplicationEngine(QObject* parent)
 
     // Expose the Route-B WS broadcaster to QML as `px4WsRelay`.
     _qmlEngine->rootContext()->setContextProperty(QStringLiteral("px4WsRelay"), _wsRelay);
+
+    // Expose the shared airframe-model selection to QML as `customModelRegistry`.
+    // Both the floating 3D window and the built-in Viewer3D read from it; each
+    // still builds its own RuntimeLoader instance.
+    _qmlEngine->rootContext()->setContextProperty(QStringLiteral("customModelRegistry"), _modelRegistry);
 
     _urlInterceptor = new CustomOverrideInterceptor();
     _qmlEngine->addUrlInterceptor(_urlInterceptor);

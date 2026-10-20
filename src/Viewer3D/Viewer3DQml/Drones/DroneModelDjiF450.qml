@@ -1,5 +1,6 @@
 import QtPositioning
 import QtQuick3D
+import QtQuick3D.AssetUtils
 
 import QGroundControl
 import QGroundControl.Controls
@@ -12,18 +13,31 @@ Node {
         return Number.isFinite(value) ? value : fallback;
     }
 
+    // Two model sources live behind this component: the built-in dji_f450
+    // airframe, or a user-imported asset picked in the floating 3D window.
+    // `customModelRegistry` is a root-context property of the custom build
+    // (CustomPlugin::createQmlApplicationEngine) and is the single source of
+    // truth for the selection. This component is instantiated by BOTH the
+    // floating 3D window and the built-in Viewer3D, so switching here covers
+    // both views while each view still owns its own scene instance.
+    readonly property bool   externalModel:  customModelRegistry.isExternal
+    readonly property string externalSource: customModelRegistry.externalUrl
+
     property int _angleAnimationDuration: 100
     property int _poseAnimationDuration: 200
     property double altitudeBias: 0
     property var gpsRef: QtPositioning.coordinate(0, 0, 0)
     property double heading: vehicle ? finiteOr(vehicle.heading.value, 0) : 0
-    property alias modelScale: innerNode.scale
+    property vector3d modelScale: Qt.vector3d(1, 1, 1)
     property double pitch: vehicle ? finiteOr(vehicle.pitch.value, 0) : 0
     property double pose_x: finiteOr(geo2Enu.localCoordinate.x, 0) * 10
     property double pose_y: finiteOr(geo2Enu.localCoordinate.y, 0) * 10
     // Scene coordinates are meters - use rawValue since cooked value follows the user's units setting
     property double pose_z: (finiteOr((vehicle ? vehicle.altitudeRelative.rawValue : 0), 0) + altitudeBias) * 10
     property double roll: vehicle ? finiteOr(vehicle.roll.value, 0) : 0
+    // Longest edge an imported asset is normalized to, in scene units, so it
+    // reads at the same visual size as the built-in airframe.
+    property real externalTargetExtent: 1000
     property var vehicle
 
     rotation: Quaternion.fromEulerAngles(Qt.vector3d(0, 0, (90 - body.heading)))
@@ -84,15 +98,21 @@ Node {
             }
         }
 
+        //---------------------------------------------------------------------
+        // Built-in airframe (dji_f450). Rotations below are tuned for the
+        // shipped mesh set; do not reuse them for imported assets.
         Node {
             eulerRotation {
                 x: 90
             }
 
+            visible: !body.externalModel
+
             Node {
                 id: innerNode
 
                 eulerRotation: Qt.vector3d(0, 90, 0)
+                scale: body.modelScale
 
                 Node {
                     eulerRotation: Qt.vector3d(0, 45, 0)
@@ -119,6 +139,68 @@ Node {
                     AnimatedPropeller { meshSource: "Djif450/DroneModel_propeller22_2/node.mesh"; pivotPoint: Qt.vector3d(343.42, 404.16, 333.06); rotationTarget: -360; flightMode: vehicle ? (vehicle.armed + vehicle.flying) : 0 }
                     AnimatedPropeller { meshSource: "Djif450/DroneModel_propeller2_2/node.mesh"; pivotPoint: Qt.vector3d(119.51, 402.66, 557.75); rotationTarget: 360; flightMode: vehicle ? (vehicle.armed + vehicle.flying) : 0 }
                     AnimatedPropeller { meshSource: "Djif450/DroneModel_propeller2_7/node.mesh"; pivotPoint: Qt.vector3d(567.97, 404.00, 558.26); rotationTarget: 360; flightMode: vehicle ? (vehicle.armed + vehicle.flying) : 0 }
+                }
+            }
+        }
+
+        //---------------------------------------------------------------------
+        // User-imported asset (.glb / self-contained .gltf / .obj, or the
+        // .gltf picked from a resource folder). RuntimeLoader does no
+        // automatic scaling, centering or re-orientation, so it is all done
+        // here from the reported bounds.
+        Node {
+            id: externalRoot
+
+            visible: body.externalModel
+            // Vertical trim for assets whose nose does not sit on the usual
+            // glTF forward axis. Applied about the scene up axis, outside the
+            // Y-up -> Z-up correction below.
+            eulerRotation.z: customModelRegistry.externalYawDeg
+
+            Node {
+                eulerRotation {
+                    x: 90
+                }
+
+                RuntimeLoader {
+                    id: externalLoader
+
+                    // Read-only consumer: nothing here is ever fed back to the
+                    // relay, the vehicle or any other view.
+                    source: body.externalSource
+
+                    readonly property real _sizeX: bounds.maximum.x - bounds.minimum.x
+                    readonly property real _sizeY: bounds.maximum.y - bounds.minimum.y
+                    readonly property real _sizeZ: bounds.maximum.z - bounds.minimum.z
+                    readonly property real _extent: Math.max(_sizeX, Math.max(_sizeY, _sizeZ))
+                    // Bounds are not valid until the asset is loaded, so fall
+                    // back to the raw size for that first instant instead of
+                    // collapsing the node to zero.
+                    readonly property real _normalize: (_extent > 0.001)
+                                                        ? (body.externalTargetExtent / _extent) : 1.0
+                    readonly property real _scale: _normalize * body.modelScale.x
+
+                    scale: Qt.vector3d(_scale, _scale, _scale)
+                    // Bounds are in the asset's own frame, so the scale is not
+                    // part of the offset used to bring its center to the origin.
+                    position: Qt.vector3d(
+                        -(bounds.minimum.x + bounds.maximum.x) * 0.5 * _scale,
+                        -(bounds.minimum.y + bounds.maximum.y) * 0.5 * _scale,
+                        -(bounds.minimum.z + bounds.maximum.z) * 0.5 * _scale)
+
+                    onStatusChanged: _report()
+                    onBoundsChanged: _report()
+
+                    function _report() {
+                        // Bounds are also reported once the asset finishes
+                        // loading; the Error branch keeps a failure from being
+                        // swallowed by the _extent guard below.
+                        if (status === RuntimeLoader.Error) {
+                            customModelRegistry.reportLoadResult(false, errorString)
+                        } else if (status === RuntimeLoader.Success && _extent > 0.001) {
+                            customModelRegistry.reportLoadResult(true, "")
+                        }
+                    }
                 }
             }
         }

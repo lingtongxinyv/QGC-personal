@@ -76,6 +76,30 @@ Rectangle {
         return (v === null || v === undefined) ? "--" : Number(v).toFixed(digits) + (suffix || "")
     }
 
+    // The registry publishes a stable ASCII code and the QML side owns the
+    // wording, which keeps every C++ literal ASCII (MSVC code page 936).
+    function _noticeText() {
+        var code = customModelRegistry.noticeCode
+        if (!code) {
+            return ""
+        }
+        var detail = customModelRegistry.noticeDetail
+        switch (code) {
+        case "file-missing":
+            return qsTr("找不到该文件或文件夹：") + detail
+        case "unsupported-format":
+            return qsTr("不支持的格式，仅支持 .glb / .gltf / .obj：") + detail
+        case "folder-no-model":
+            return qsTr("该文件夹内未找到 .glb / .gltf / .obj 模型文件：") + detail
+        case "load-failed":
+            return qsTr("模型加载失败：") + detail
+        case "obj-approximate":
+            return qsTr("OBJ 已加载；若源文件缺少 .mtl，将自动降级为无贴图")
+        default:
+            return code
+        }
+    }
+
     // Route-B relay is only useful while the viewer is actually on screen, so
     // start/stop it with (visible && open) instead of running it unconditionally.
     function _updateRelay() {
@@ -96,6 +120,11 @@ Rectangle {
         }
         var host = root.detached ? detachedWindow.contentItem : embeddedSceneHost
         _sceneItem = sceneComponent.createObject(host)
+        if (!_sceneItem) {
+            // A silent null here leaves a black panel with no clue why.
+            console.warn("AttitudeView3D: could not instantiate the 3D scene in "
+                         + (root.detached ? "the detached window" : "the embedded host"))
+        }
     }
 
     onOpenChanged:      _updateRelay()
@@ -167,15 +196,65 @@ Rectangle {
         }
 
         QGCLabel {
+            id: titleLabel
             anchors.left: parent.left
             anchors.leftMargin: root._margin
+            anchors.right: paramButton.left
+            anchors.rightMargin: root._margin
             anchors.verticalCenter: parent.verticalCenter
-            text: qsTr("3D 姿态视图 · %1").arg(root.modelId)
+            elide: Text.ElideRight
+            text: qsTr("3D 模型 · %1").arg(customModelRegistry.displayName)
             color: qgcPal.text
         }
 
         QGCLabel {
+            id: modelButton
+            anchors.right: resetButton.left
+            anchors.rightMargin: root._margin
+            anchors.verticalCenter: parent.verticalCenter
+            text: qsTr("模型")
+            color: qgcPal.text
+
+            MouseArea {
+                anchors.fill: parent
+                onClicked: modelFileDialog.openForLoad()
+            }
+        }
+
+        QGCLabel {
+            id: resetButton
+            anchors.right: yawButton.left
+            anchors.rightMargin: root._margin
+            anchors.verticalCenter: parent.verticalCenter
+            text: qsTr("恢复内置")
+            color: customModelRegistry.isExternal ? qgcPal.colorOrange : qgcPal.text
+            opacity: customModelRegistry.isExternal ? 1.0 : 0.55
+
+            MouseArea {
+                anchors.fill: parent
+                onClicked: customModelRegistry.resetToBuiltin()
+            }
+        }
+
+        QGCLabel {
+            id: yawButton
             anchors.right: detachButton.left
+            anchors.rightMargin: root._margin
+            anchors.verticalCenter: parent.verticalCenter
+            text: qsTr("旋转90°")
+            color: qgcPal.text
+            opacity: customModelRegistry.isExternal ? 1.0 : 0.55
+
+            MouseArea {
+                anchors.fill: parent
+                enabled: customModelRegistry.isExternal
+                onClicked: customModelRegistry.setExternalYawDeg(customModelRegistry.externalYawDeg + 90)
+            }
+        }
+
+        QGCLabel {
+            id: paramButton
+            anchors.right: modelButton.left
             anchors.rightMargin: root._margin
             anchors.verticalCenter: parent.verticalCenter
             text: qsTr("参数")
@@ -254,6 +333,30 @@ Rectangle {
         anchors.top:    titleBar.bottom
         anchors.bottom: parent.bottom
         anchors.margins: root._margin
+    }
+
+    //-------------------------------------------------------------------------
+    // Model pickers. QGCFileDialog returns absolute local paths for both files
+    // and folders, which is exactly what ModelRegistry takes.
+    QGCFileDialog {
+        id: modelFileDialog
+        title: qsTr("选择 3D 模型文件（.glb / .gltf / .obj）")
+        nameFilters: [ qsTr("3D 模型 (*.glb *.gltf *.obj)") ]
+
+        onAcceptedForLoad: function (file) {
+            customModelRegistry.selectFile(file)
+        }
+    }
+
+    // Fallback route for .gltf assets that reference sibling .bin / textures.
+    QGCFileDialog {
+        id: modelFolderDialog
+        title: qsTr("选择模型资源文件夹（内含 .glb / .gltf / .obj）")
+        selectFolder: true
+
+        onAcceptedForLoad: function (folder) {
+            customModelRegistry.selectFolder(folder)
+        }
     }
 
     //-------------------------------------------------------------------------
@@ -359,13 +462,79 @@ Rectangle {
             }
 
             //-----------------------------------------------------------------
+            // Model-import notice. Declared after the camera MouseArea so it
+            // stays clickable, and inside the re-created scene so it shows in
+            // both the embedded panel and the detached window.
+            Rectangle {
+                id: noticeStrip
+
+                readonly property bool shown: root._noticeText().length > 0
+
+                anchors.top: parent.top
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.margins: root._margin
+                height: shown ? noticeText.implicitHeight + root._margin * 2 : 0
+                visible: shown
+                radius: 3
+                clip: true
+                color: customModelRegistry.noticeLevel === "error" ? "#5c1b1b"
+                     : (customModelRegistry.noticeLevel === "warn" ? "#5c4a1b" : "#1b3a5c")
+
+                QGCLabel {
+                    id: noticeText
+                    anchors.left: parent.left
+                    anchors.right: (noticeAction.visible ? noticeAction.left : noticeDismiss.left)
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.leftMargin: root._margin
+                    anchors.rightMargin: root._margin
+                    wrapMode: Text.WordWrap
+                    text: root._noticeText()
+                    color: "white"
+                    font.pointSize: ScreenTools.smallFontPointSize
+                }
+
+                QGCLabel {
+                    id: noticeAction
+                    anchors.right: noticeDismiss.left
+                    anchors.rightMargin: root._margin * 3
+                    anchors.verticalCenter: parent.verticalCenter
+                    // A .gltf whose textures/.bin live next to it cannot be
+                    // loaded from a single-file pick, so offer the folder route
+                    // right where the failure is reported.
+                    visible: customModelRegistry.noticeCode === "load-failed"
+                    text: qsTr("改选文件夹")
+                    color: "#ffd479"
+
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: modelFolderDialog.openForLoad()
+                    }
+                }
+
+                QGCLabel {
+                    id: noticeDismiss
+                    anchors.right: parent.right
+                    anchors.rightMargin: root._margin
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: qsTr("✕")
+                    color: "white"
+
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: customModelRegistry.dismissNotice()
+                    }
+                }
+            }
+
+            //-----------------------------------------------------------------
             // HUD (left-top, complementary to on-model labels)
             //   line 1 : flight mode · arm state · attitude   (primary)
             //   row 2  : altitude / groundspeed / climb / battery / GPS in
             //            separate columns so labels can never overlap   (readout)
             Rectangle {
                 anchors.left: parent.left
-                anchors.top: parent.top
+                anchors.top: noticeStrip.visible ? noticeStrip.bottom : parent.top
                 anchors.margins: root._margin
                 width: hudColumn.width + root._margin * 2
                 height: hudColumn.height + root._margin * 2

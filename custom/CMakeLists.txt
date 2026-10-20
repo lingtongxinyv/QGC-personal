@@ -123,6 +123,8 @@ set(CUSTOM_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/AssistantClient.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/TelemetryWsRelay.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/src/TelemetryWsRelay.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ModelRegistry.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ModelRegistry.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/AutoPilotPlugin/CustomAutoPilotPlugin.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/src/AutoPilotPlugin/CustomAutoPilotPlugin.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/FirmwarePlugin/CustomFirmwarePlugin.cc
