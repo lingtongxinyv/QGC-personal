@@ -8,9 +8,7 @@
 //      in TelemetryWsRelay.cc). The non-loopback external bridge is still a
 //      separate work item pending an owner ruling.
 //
-// v2 changes (batch B5 phase 1, append-only - E3 acceptance):
-//   - SCHEMA_VERSION bumped 1 -> 2. Every v1 field keeps its name, unit and
-//     semantics; consumers written against v1 keep working.
+// v2 fields (batch B5 phase 1, append-only - E3 acceptance):
 //   - NEW top-level section "gcs": ground-station-side facts (link lost flag,
 //     RC RSSI, MAVLink loss rate, message counters). Read-only facts, NOT
 //     alerts - alert data must never enter the relay or Unity (E2).
@@ -19,13 +17,24 @@
 //     (vehicle.vehicle.* / vehicle.batteries.get(0)) while still supporting
 //     the legacy direct-property shape (vehicle.roll / vehicle.battery).
 //
+// Version policy (xiaoling v9 receipt, E3): additive fields do NOT bump
+// schema_version. The route-B Unity client hard-drops any frame whose
+// schema_version differs from its expectedSchemaVersion (=1), so the bump
+// to 2 broke exactly the consumers E3 promised to keep working.
+// schema_version is bumped ONLY on breaking changes (field removed, renamed,
+// or semantics changed), coordinated with a Unity client update in the same
+// batch.
+//
+// link_active semantics: false when no vehicle object exists; with a vehicle
+// it reflects the real link state (gcs.link_lost), defaulting to true while
+// the link state is still unknown.
+//
 // Rules for external consumers:
 //   - All angles are degrees, all distances meters, all speeds m/s.
 //   - altitude_rel_m is relative to takeoff (matches HUD), altitude_amsl_m is AMSL.
 //   - Fields may be null when the vehicle has not reported them yet; consumers
 //     must treat null as "unknown", not as 0.
-//   - schema_version is bumped only on breaking changes; additions bump the
-//     minor-compatible part documented in this header instead.
+//   - schema_version is bumped only on breaking changes (see policy above).
 //   - attitude_deg.yaw and heading_deg are the SAME source (vehicle heading);
 //     both are emitted so consumers can pick either shape. (review 051224Z-3a)
 //   - timestamp_ms comes from Date.now(): wall clock, may jump backwards on
@@ -35,7 +44,7 @@
 
 .pragma library
 
-var SCHEMA_VERSION = 2
+var SCHEMA_VERSION = 1
 
 function _num(v) {
     return (typeof v === "number" && isFinite(v)) ? v : null
@@ -106,7 +115,7 @@ function snapshot(vehicle) {
         "schema_version": SCHEMA_VERSION,
         "timestamp_ms": Date.now(),
         "vehicle_id": vehicle.id,
-        "link_active": true,
+        "link_active": (linkLost === null) ? true : !linkLost,
         "attitude_deg": {
             "roll":  roll,
             "pitch": pitch,

@@ -196,6 +196,16 @@ void AlertEngine::resetAll()
     }
 }
 
+void AlertEngine::injectMockFact(const QString &name, const QVariant &value)
+{
+    _mockFacts.insert(name, value);
+}
+
+void AlertEngine::clearMockFacts()
+{
+    _mockFacts.clear();
+}
+
 QVariantMap AlertEngine::_eventPayload(const QString &ruleId, int level,
                                        const QString &code, const QVariantMap &detail) const
 {
@@ -260,6 +270,26 @@ void AlertEngine::_applyDesired(const QString &ruleId, bool active, int level,
             if (!state.historyEntry.isEmpty()) {
                 _closeHistoryEntry(state.historyEntry, nowMs);
                 state.historyEntry = QVariantMap();
+            } else if (state.suppressedCount > 0) {
+                // Cooldown-throttled activation (xiaoling v9 P3-2): the alert
+                // was live but never announced, so without this row a short
+                // alert would vanish from the history entirely.
+                QVariantMap entry;
+                entry["ruleId"]      = ruleId;
+                entry["code"]        = state.code;
+                entry["level"]       = state.level;
+                entry["levelPeak"]   = state.peakLevel;
+                QVariantMap detail = state.detail;
+                detail["suppressed"] = state.suppressedCount;
+                entry["detail"]      = detail;
+                entry["raisedMs"]    = state.sinceMs;
+                entry["recoveredMs"] = nowMs;
+                entry["active"]      = false;
+                _history.prepend(entry);
+                while (_history.size() > _historyCap) {
+                    _history.removeLast();
+                }
+                emit historyChanged();
             }
             if (state.announced) {
                 emit alertCleared(_eventPayload(ruleId, state.level, state.code, state.detail));
@@ -267,6 +297,7 @@ void AlertEngine::_applyDesired(const QString &ruleId, bool active, int level,
             state.announced = false;
             state.level = 0;
             state.peakLevel = 0;
+            state.suppressedCount = 0;
             state.code.clear();
             state.detail.clear();
             dirty = true;
@@ -285,9 +316,11 @@ void AlertEngine::_applyDesired(const QString &ruleId, bool active, int level,
             _announce(state, ruleId, nowMs);
         } else {
             // Re-trigger inside the cooldown window: the state becomes active
-            // but the event is throttled (acceptance A2), so no history row yet.
+            // but the event is throttled (acceptance A2), so no history row
+            // yet - the count is recorded and flushed on clear instead.
             state.announced = false;
             state.historyEntry = QVariantMap();
+            state.suppressedCount++;
         }
         dirty = true;
         return;
@@ -435,8 +468,8 @@ void AlertEngine::_tick()
     QObject *radio = _childObject(vehicle, "radioStatus");
     QObject *links = _childObject(vehicle, "vehicleLinkManager");
 
-    const bool armed   = vehicle->armed();
-    const bool flying  = vehicle->flying();
+    bool armed   = vehicle->armed();
+    bool flying  = vehicle->flying();
     const QString mode = vehicle->flightMode();
 
     double batteryPct = kNaN;
@@ -450,14 +483,14 @@ void AlertEngine::_tick()
         }
     }
 
-    const double roll      = _factNum(veh, "roll");
-    const double pitch     = _factNum(veh, "pitch");
-    const double altRel    = _factNum(veh, "altitudeRelative");
-    const double climbRate = _factNum(veh, "climbRate");
-    const double rcRssi    = _factNum(veh, "rcRSSI");            // 0-100, 255 = invalid
-    const double sats      = _factNum(gps, "count");
-    const double hdop      = _factNum(gps, "hdop");
-    const double lossPct   = static_cast<double>(vehicle->mavlinkLossPercent());
+    double roll      = _factNum(veh, "roll");
+    double pitch     = _factNum(veh, "pitch");
+    double altRel    = _factNum(veh, "altitudeRelative");
+    double climbRate = _factNum(veh, "climbRate");
+    double rcRssi    = _factNum(veh, "rcRSSI");            // 0-100, 255 = invalid
+    double sats      = _factNum(gps, "count");
+    double hdop      = _factNum(gps, "hdop");
+    double lossPct   = static_cast<double>(vehicle->mavlinkLossPercent());
 
     // Data freshness: the received-message counter acts as the change epoch.
     const quint64 receivedCount = vehicle->mavlinkReceivedCount();
@@ -465,7 +498,8 @@ void AlertEngine::_tick()
         _lastReceivedCount = receivedCount;
         _lastDataMs = nowMs;
     }
-    const double staleSec = static_cast<double>(nowMs - _lastDataMs) / 1000.0;
+    const double staleSecRaw = static_cast<double>(nowMs - _lastDataMs) / 1000.0;
+    double staleSec = staleSecRaw;
 
     // Flight mode tracking for the informational mode-change notice (R7).
     if (mode != _lastFlightMode) {
@@ -475,7 +509,60 @@ void AlertEngine::_tick()
         _lastFlightMode = mode;
     }
     if (_fenceBreachLatched && !armed) {
-        _fenceBreachLatched = false; // breach state resets on disarm
+        _fenceBreachLatched = false;    // breach state resets on disarm
+    }
+
+    // Prepared locals for the rules - also the mock-override surface (A1).
+    bool commLost        = links ? links->property("communicationLost").toBool() : false;
+    double radioRssiDbm  = (radio && radio->property("telemetryAvailable").toBool())
+                           ? _factNum(radio, "rrssi") : kNaN;
+    bool estGoodHorizPos = est ? _factBool(est, "goodHorizPosRelEstimate") : true;
+    bool estGoodAttitude = est ? _factBool(est, "goodAttitudeEstimate") : true;
+    bool estGoodHorizVel = est ? _factBool(est, "goodHorizVelEstimate") : true;
+    bool estGoodVertVel  = est ? _factBool(est, "goodVertVelEstimate") : true;
+    bool estGpsGlitch    = est ? _factBool(est, "gpsGlitch") : false;
+    bool estAccelError   = est ? _factBool(est, "accelError") : false;
+    bool preflightReady  = !(vehicle->readyToFlyAvailable() && !vehicle->readyToFly());
+    bool sensorsHealthy  = vehicle->allSensorsHealthy();
+    bool homeValid       = vehicle->homePosition().isValid();
+    bool fenceBreach     = _fenceBreachLatched;
+    const int fenceType  = _fenceBreachType;
+
+    // Debug/acceptance hook (A1): injected mock facts override live values so
+    // every rule can be exercised without a SITL scenario. Empty = passthrough.
+    if (!_mockFacts.isEmpty()) {
+        auto md = [this](const char *key, double cur) {
+            const auto k = QLatin1String(key);
+            return _mockFacts.contains(k) ? _mockFacts.value(k).toDouble() : cur;
+        };
+        auto mb = [this](const char *key, bool cur) {
+            const auto k = QLatin1String(key);
+            return _mockFacts.contains(k) ? _mockFacts.value(k).toBool() : cur;
+        };
+        batteryPct      = md("batteryPct", batteryPct);
+        roll            = md("roll", roll);
+        pitch           = md("pitch", pitch);
+        altRel          = md("altRel", altRel);
+        climbRate       = md("climbRate", climbRate);
+        rcRssi          = md("rcRssi", rcRssi);
+        sats            = md("sats", sats);
+        hdop            = md("hdop", hdop);
+        lossPct         = md("lossPct", lossPct);
+        staleSec        = md("staleSec", staleSec);
+        radioRssiDbm    = md("radioRssiDbm", radioRssiDbm);
+        armed           = mb("armed", armed);
+        flying          = mb("flying", flying);
+        commLost        = mb("commLost", commLost);
+        estGoodHorizPos = mb("goodHorizPosRel", estGoodHorizPos);
+        estGoodAttitude = mb("goodAttitude", estGoodAttitude);
+        estGoodHorizVel = mb("goodHorizVel", estGoodHorizVel);
+        estGoodVertVel  = mb("goodVertVel", estGoodVertVel);
+        estGpsGlitch    = mb("gpsGlitch", estGpsGlitch);
+        estAccelError   = mb("accelError", estAccelError);
+        preflightReady  = mb("preflightReady", preflightReady);
+        sensorsHealthy  = mb("sensorsHealthy", sensorsHealthy);
+        homeValid       = mb("homeValid", homeValid);
+        fenceBreach     = mb("fenceBreach", fenceBreach);
     }
 
     // ------------------------------------------------------------ R1 battery
@@ -503,7 +590,6 @@ void AlertEngine::_tick()
         bool active = false;
         int level = 0;
         QString code;
-        const bool commLost = links ? links->property("communicationLost").toBool() : false;
         detail["commLost"] = commLost;
         if (commLost) {
             active = true; level = 2; code = "link-lost";
@@ -516,15 +602,12 @@ void AlertEngine::_tick()
                     active = true; level = 1; code = "rc-signal-low";
                 }
             }
-            if (radio && radio->property("telemetryAvailable").toBool()) {
-                const double rrssi = _factNum(radio, "rrssi");
-                if (!std::isnan(rrssi) && rrssi < 0.0) {
-                    detail["radioRssiDbm"] = rrssi;
-                    if (rrssi <= threshold("radio-rssi-crit-dbm")) {
-                        active = true; level = 2; code = "radio-link-critical";
-                    } else if (rrssi <= threshold("radio-rssi-warn-dbm") && !active) {
-                        active = true; level = 1; code = "radio-link-low";
-                    }
+            if (!std::isnan(radioRssiDbm) && radioRssiDbm < 0.0) {
+                detail["radioRssiDbm"] = radioRssiDbm;
+                if (radioRssiDbm <= threshold("radio-rssi-crit-dbm")) {
+                    active = true; level = 2; code = "radio-link-critical";
+                } else if (radioRssiDbm <= threshold("radio-rssi-warn-dbm") && !active) {
+                    active = true; level = 1; code = "radio-link-low";
                 }
             }
         }
@@ -567,22 +650,20 @@ void AlertEngine::_tick()
         int level = 0;
         QString code;
         const bool inAir = flying || armed;
-        if (inAir && est) {
-            const bool gpsGlitch  = _factBool(est, "gpsGlitch");
-            const bool accelError = _factBool(est, "accelError");
-            detail["gpsGlitch"]  = gpsGlitch;
-            detail["accelError"] = accelError;
-            if (!_factBool(est, "goodHorizPosRelEstimate")) {
+        if (inAir) {
+            detail["gpsGlitch"]  = estGpsGlitch;
+            detail["accelError"] = estAccelError;
+            if (!estGoodHorizPos) {
                 active = true; level = 2; code = "estimator-pos-lost";
-            } else if (!_factBool(est, "goodAttitudeEstimate")) {
+            } else if (!estGoodAttitude) {
                 active = true; level = 1; code = "estimator-attitude";
-            } else if (!_factBool(est, "goodHorizVelEstimate")) {
+            } else if (!estGoodHorizVel) {
                 active = true; level = 1; code = "estimator-vel-horiz";
-            } else if (!_factBool(est, "goodVertVelEstimate")) {
+            } else if (!estGoodVertVel) {
                 active = true; level = 1; code = "estimator-vel-vert";
-            } else if (gpsGlitch) {
+            } else if (estGpsGlitch) {
                 active = true; level = 1; code = "gps-glitch";
-            } else if (accelError) {
+            } else if (estAccelError) {
                 active = true; level = 1; code = "accel-error";
             }
         }
@@ -653,8 +734,8 @@ void AlertEngine::_tick()
         bool active = false;
         int level = 0;
         QString code;
-        if (_fenceBreachLatched) {
-            detail["breachType"] = _fenceBreachType;
+        if (fenceBreach) {
+            detail["breachType"] = fenceType;
             active = true; level = 2; code = "fence-breach";
         }
         apply("R8", active, level, code, detail);
@@ -667,10 +748,10 @@ void AlertEngine::_tick()
         int level = 0;
         QString code;
         if (!armed) {
-            if (vehicle->readyToFlyAvailable() && !vehicle->readyToFly()) {
+            if (!preflightReady) {
                 active = true; level = 1; code = "preflight-not-ready";
             }
-            if (!vehicle->allSensorsHealthy() && level < 1) {
+            if (!sensorsHealthy && level < 1) {
                 active = true; level = 1; code = "preflight-sensors";
             }
             if (!std::isnan(batteryPct) && batteryPct > 0.0
@@ -682,7 +763,7 @@ void AlertEngine::_tick()
                 detail["sats"] = sats;
                 active = true; level = 1; code = "preflight-gps";
             }
-            if (!vehicle->homePosition().isValid() && level < 1) {
+            if (!homeValid && level < 1) {
                 active = true; level = 0; code = "preflight-no-home"; // informational
             }
         }

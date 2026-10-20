@@ -59,6 +59,14 @@ public:
     /// [{key, def, min, max}] descriptors for the QML settings UI.
     Q_INVOKABLE QVariantList thresholdDefaults() const;
 
+    /// Debug/acceptance hook (A1): inject a mock fact by name
+    /// ("batteryPct", "armed", "sats", "commLost", ...) to override the live
+    /// value at the next evaluation tick. The map persists until cleared, so
+    /// every rule R1-R10 can be exercised without a SITL scenario. Requires an
+    /// active vehicle; an empty map is a pure passthrough.
+    Q_INVOKABLE void injectMockFact(const QString &name, const QVariant &value);
+    Q_INVOKABLE void clearMockFacts();
+
 signals:
     void enabledChanged();
     void activeAlertsChanged();
@@ -79,6 +87,7 @@ private:
         bool       announced  = false;
         int        level      = 0;
         int        peakLevel  = 0;
+        int        suppressedCount = 0;
         QString    code;
         QVariantMap detail;
         qint64     sinceMs    = 0;
@@ -123,5 +132,6 @@ private:
     bool                 _fenceBreachLatched = false;
     int                  _fenceBreachType    = 0;
     qint64               _modeChangeFlashUntilMs = 0;
+    QHash<QString, QVariant>   _mockFacts;
     QHash<QString, RuleState> _ruleStates;
 };
