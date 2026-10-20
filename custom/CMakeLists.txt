@@ -56,6 +56,9 @@ set(QML_IMPORT_PATH ${QML_IMPORT_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/res" CACHE S
 qt_add_library(CustomModule STATIC)
 
 set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/res/Custom/Widgets/CustomArtificialHorizon.qml PROPERTIES QT_RESOURCE_ALIAS CustomArtificialHorizon.qml)
+# Plain JS library (not an ES module): keep it as a module resource but do not
+# list it as a qmldir entry. Imported via relative path from AttitudeView3D.qml.
+set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/src/TelemetrySnapshot.js PROPERTIES QT_QML_SKIP_QMLDIR_ENTRY TRUE)
 qgc_set_qt_resource_alias(
     ${CMAKE_CURRENT_SOURCE_DIR}/res/Custom/Widgets/CustomAttitudeWidget.qml
     ${CMAKE_CURRENT_SOURCE_DIR}/res/Custom/Widgets/CustomIconButton.qml
@@ -64,6 +67,9 @@ qgc_set_qt_resource_alias(
     ${CMAKE_CURRENT_SOURCE_DIR}/res/Custom/Widgets/CustomSignalStrength.qml
     ${CMAKE_CURRENT_SOURCE_DIR}/res/Custom/Widgets/CustomToolBarButton.qml
     ${CMAKE_CURRENT_SOURCE_DIR}/res/Custom/Widgets/CustomVehicleButton.qml
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/AssistantPanel.qml
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/AttitudeView3D.qml
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/TelemetrySnapshot.js
 )
 
 qt_add_qml_module(CustomModule
@@ -79,6 +85,9 @@ qt_add_qml_module(CustomModule
         ${CMAKE_CURRENT_SOURCE_DIR}/res/Custom/Widgets/CustomSignalStrength.qml
         ${CMAKE_CURRENT_SOURCE_DIR}/res/Custom/Widgets/CustomToolBarButton.qml
         ${CMAKE_CURRENT_SOURCE_DIR}/res/Custom/Widgets/CustomVehicleButton.qml
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/AssistantPanel.qml
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/AttitudeView3D.qml
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/TelemetrySnapshot.js
     NO_PLUGIN
 )
 
@@ -110,6 +119,10 @@ qt_add_qml_module(CustomPlanModule
 set(CUSTOM_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/CustomPlugin.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/src/CustomPlugin.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/AssistantClient.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/AssistantClient.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/TelemetryWsRelay.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/TelemetryWsRelay.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/AutoPilotPlugin/CustomAutoPilotPlugin.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/src/AutoPilotPlugin/CustomAutoPilotPlugin.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/FirmwarePlugin/CustomFirmwarePlugin.cc
@@ -150,5 +163,9 @@ set(CUSTOM_DEFINITIONS
 
 set(CUSTOM_QT_COMPONENTS
     Core
+    Network
+    WebSockets
     CACHE INTERNAL "" FORCE
 )
+
+find_package(Qt6 COMPONENTS WebSockets REQUIRED)

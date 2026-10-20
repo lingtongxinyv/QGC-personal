@@ -9,10 +9,12 @@
 class ComplexMissionItem;
 class PlanCreator;
 
+class AssistantClient;
 class CustomOptions;
 class CustomPlugin;
 class CustomSettings;
 class QQmlApplicationEngine;
+class TelemetryWsRelay;
 
 Q_DECLARE_LOGGING_CATEGORY(CustomLog)
 
@@ -92,6 +94,8 @@ private:
     void _addSettingsEntry(const QString& title, const char* qmlFile, const char* iconFile = nullptr);
 
     CustomOptions *_options = nullptr;
+    AssistantClient *_assistant = nullptr;
+    TelemetryWsRelay *_wsRelay = nullptr;
     QQmlApplicationEngine *_qmlEngine = nullptr;
     class CustomOverrideInterceptor *_urlInterceptor = nullptr;
     QVariantList _customSettingsList; // Not to be mixed up with QGCCorePlugin implementation

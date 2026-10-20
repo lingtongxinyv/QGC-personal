@@ -1,4 +1,6 @@
 #include "CustomPlugin.h"
+#include "AssistantClient.h"
+#include "TelemetryWsRelay.h"
 #include "PerimeterScanComplexItem.h"
 #include "PerimeterScanPlanCreator.h"
 #include "QmlComponentInfo.h"
@@ -9,6 +11,7 @@
 
 #include <QtCore/QApplicationStatic>
 #include <QtQml/QQmlApplicationEngine>
+#include <QtQml/QQmlContext>
 #include <QtQml/QQmlFile>
 
 QGC_LOGGING_CATEGORY(CustomLog, "Custom.CustomPlugin")
@@ -34,6 +37,8 @@ CustomOptions::CustomOptions(CustomPlugin *plugin, QObject *parent)
 CustomPlugin::CustomPlugin(QObject *parent)
     : QGCCorePlugin(parent)
     , _options(new CustomOptions(this, this))
+    , _assistant(new AssistantClient(this))
+    , _wsRelay(new TelemetryWsRelay(this))
 {
     qCDebug(CustomLog) << this;
 
@@ -251,6 +256,12 @@ QQmlApplicationEngine* CustomPlugin::createQmlApplicationEngine(QObject* parent)
     _qmlEngine->addImportPath("qrc:/qml/Custom/Widgets");
     _qmlEngine->addImportPath("qrc:/qml/Custom/Plan");
     // TODO: Investigate _qmlEngine->setExtraSelectors({"custom"})
+
+    // Expose the DSH px4-panel HTTP/SSE client to QML as `px4Assistant`.
+    _qmlEngine->rootContext()->setContextProperty(QStringLiteral("px4Assistant"), _assistant);
+
+    // Expose the Route-B WS broadcaster to QML as `px4WsRelay`.
+    _qmlEngine->rootContext()->setContextProperty(QStringLiteral("px4WsRelay"), _wsRelay);
 
     _urlInterceptor = new CustomOverrideInterceptor();
     _qmlEngine->addUrlInterceptor(_urlInterceptor);

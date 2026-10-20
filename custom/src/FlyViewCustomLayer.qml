@@ -45,7 +45,7 @@ Item {
         leftEdgeCenterInset:    exampleRectangle.leftEdgeCenterInset
         leftEdgeBottomInset:    parentToolInsets.leftEdgeBottomInset
         rightEdgeTopInset:      parentToolInsets.rightEdgeTopInset
-        rightEdgeCenterInset:   parentToolInsets.rightEdgeCenterInset
+        rightEdgeCenterInset:   assistantPanel.rightEdgeCenterInset
         rightEdgeBottomInset:   parent.width - compassBackground.x
         topEdgeLeftInset:       parentToolInsets.topEdgeLeftInset
         topEdgeCenterInset:     compassArrowIndicator.y + compassArrowIndicator.height
@@ -241,4 +241,36 @@ Item {
             anchors.centerIn:   parent
         }
     }
+
+    //-------------------------------------------------------------------------
+    //-- DSH 副驾驶 · 小云（只读答疑，右侧栏）
+    //   通道与协议：coord/design/px4-chat-http.md
+    AssistantPanel {
+        id:                     assistantPanel
+        visible:                !QGroundControl.videoManager.fullScreen
+        anchors.top:            parent.top
+        anchors.bottom:         attitudeIndicator.top
+        anchors.right:          parent.right
+        anchors.topMargin:      parentToolInsets.topEdgeRightInset + _toolsMargin
+        anchors.bottomMargin:   _toolsMargin
+        anchors.rightMargin:    _toolsMargin
+        parentToolInsets:       parentToolInsets
+        mapControl:             mapControl
+    }
+
+    //-------------------------------------------------------------------------
+    //-- 3D 姿态视图（内嵌浮窗，Ctrl+Shift+3 唤起/收起）
+    AttitudeView3D {
+        id:                     attitudeView3D
+        visible:                !QGroundControl.videoManager.fullScreen
+        vehicle:                _activeVehicle
+        parentToolInsets:       parentToolInsets
+
+        Shortcut {
+            sequence:           "Ctrl+Shift+3"
+            context:            Qt.ApplicationShortcut
+            onActivated:        attitudeView3D.open = !attitudeView3D.open
+        }
+    }
+
 }
