@@ -9,6 +9,7 @@ import QGroundControl.Controls
 import QGroundControl.Viewer3D
 
 import "TelemetrySnapshot.js" as Telemetry
+import "AlertText.js" as AlertText
 
 /// Floating 3D attitude viewer (read-only). Shows the active vehicle as a live
 /// 3D model driven by its telemetry: roll/pitch/yaw, position over the takeoff
@@ -635,6 +636,45 @@ Rectangle {
                                 text: root._snap ? root._fmt(root._snap.status.gps_sats, 0, qsTr(" 星")) : "--"
                                 color: "white"
                                 font.pointSize: ScreenTools.defaultFontPointSize
+                            }
+                        }
+                    }
+
+                    //---------------------------------------------------------
+                    // Inline alerts (nearest-to-flight presentation, Q4): up to
+                    // three highest-level active alerts from the local rule
+                    // engine, same wording as the panel banner (B1).
+                    //---------------------------------------------------------
+                    Column {
+                        id: hudAlerts
+                        spacing: 2
+
+                        readonly property bool _engineOk: customAlertEngine.state === "ok"
+                        readonly property var  _list: customAlertEngine.activeAlerts
+
+                        QGCLabel {
+                            visible: !hudAlerts._engineOk
+                            text: qsTr("告警引擎已停用")
+                            color: "#9aa3b2"
+                            font.pointSize: ScreenTools.smallFontPointSize
+                        }
+
+                        Repeater {
+                            model: {
+                                var list = []
+                                if (hudAlerts._engineOk) {
+                                    for (var i = 0; i < Math.min(hudAlerts._list.length, 3); i++) {
+                                        list.push(hudAlerts._list[i])
+                                    }
+                                }
+                                return list
+                            }
+
+                            delegate: QGCLabel {
+                                required property var modelData
+                                text: "[" + AlertText.ruleName(modelData.ruleId) + "] " + AlertText.text(modelData)
+                                color: AlertText.levelColor(modelData.level)
+                                font.pointSize: ScreenTools.smallFontPointSize
                             }
                         }
                     }

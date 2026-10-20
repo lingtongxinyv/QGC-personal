@@ -10,6 +10,7 @@ class ComplexMissionItem;
 class PlanCreator;
 
 class AssistantClient;
+class AlertEngine;
 class CustomOptions;
 class CustomPlugin;
 class CustomSettings;
@@ -98,6 +99,7 @@ private:
     AssistantClient *_assistant = nullptr;
     TelemetryWsRelay *_wsRelay = nullptr;
     ModelRegistry *_modelRegistry = nullptr;
+    AlertEngine *_alertEngine = nullptr;
     QQmlApplicationEngine *_qmlEngine = nullptr;
     class CustomOverrideInterceptor *_urlInterceptor = nullptr;
     QVariantList _customSettingsList; // Not to be mixed up with QGCCorePlugin implementation

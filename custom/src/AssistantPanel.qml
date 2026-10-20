@@ -5,6 +5,8 @@ import QtQuick.Layouts
 import QGroundControl
 import QGroundControl.Controls
 
+import "AlertText.js" as AlertText
+
 /// Right side dock of the Fly view: read-only Chinese chat with the local DSH
 /// PX4 assistant (persona 小云, preset px4-ta). Backed by the `px4Assistant`
 /// context property injected in CustomPlugin::createQmlApplicationEngine.
@@ -75,6 +77,60 @@ Rectangle {
         default:                          return message !== "" ? qsTr("%1 [%2]").arg(message).arg(code) : code
         }
     }
+
+    // ------------------------------------------------------------------
+    // Alert rule engine (local, read-only). The C++ engine emits ASCII codes;
+    // the shared AlertText.js library owns all Chinese wording so the banner,
+    // the history list and the 3D HUD stay word-for-word identical (B1).
+    // ------------------------------------------------------------------
+    readonly property color _alertGreen:  AlertText.GREEN
+    readonly property color _alertYellow: AlertText.YELLOW
+    readonly property color _alertRed:    AlertText.RED
+    readonly property color _alertGrey:   qgcPal.colorGrey
+
+    property bool alertHistoryOpen: false
+    property bool alertSettingsOpen: false
+
+    readonly property var _alertLevelColor: AlertText.LEVEL_COLORS
+
+    function _alertText(alert)     { return AlertText.text(alert) }
+    function _ruleName(ruleId)     { return AlertText.ruleName(ruleId) }
+    function _alertTimeString(ms)  { return AlertText.timeString(ms) }
+
+    // Threshold settings UI descriptors (key -> Chinese label + unit).
+    readonly property var _thresholdDescriptors: [
+        { key: "battery-warn-pct",        label: qsTr("电量警告"),          unit: "%",    dec: 0 },
+        { key: "battery-crit-pct",        label: qsTr("电量严重"),          unit: "%",    dec: 0 },
+        { key: "preflight-battery-pct",   label: qsTr("起飞电量下限"),      unit: "%",    dec: 0 },
+        { key: "rssi-warn",               label: qsTr("遥控信号警告"),      unit: "%",    dec: 0 },
+        { key: "rssi-crit",               label: qsTr("遥控信号临界"),      unit: "%",    dec: 0 },
+        { key: "radio-rssi-warn-dbm",     label: qsTr("电台信号警告"),      unit: "dBm",  dec: 0 },
+        { key: "radio-rssi-crit-dbm",     label: qsTr("电台信号临界"),      unit: "dBm",  dec: 0 },
+        { key: "gps-warn-sats",           label: qsTr("卫星数警告"),        unit: qsTr("颗"), dec: 0 },
+        { key: "gps-min-sats",            label: qsTr("最少卫星数"),        unit: qsTr("颗"), dec: 0 },
+        { key: "hdop-warn",               label: qsTr("HDOP 警告"),         unit: "",     dec: 1 },
+        { key: "hdop-crit",               label: qsTr("HDOP 临界"),         unit: "",     dec: 1 },
+        { key: "attitude-soft-deg",       label: qsTr("姿态警告角"),        unit: "°",    dec: 0 },
+        { key: "attitude-hard-deg",       label: qsTr("姿态临界角"),        unit: "°",    dec: 0 },
+        { key: "max-altitude-m",          label: qsTr("最大高度"),          unit: "m",    dec: 0 },
+        { key: "descent-warn-m-s",        label: qsTr("下降率警告"),        unit: "m/s",  dec: 1 },
+        { key: "descent-crit-m-s",        label: qsTr("下降率临界"),        unit: "m/s",  dec: 1 },
+        { key: "data-stale-warn-s",       label: qsTr("数据延迟警告"),      unit: "s",    dec: 1 },
+        { key: "data-stale-crit-s",       label: qsTr("数据中断临界"),      unit: "s",    dec: 1 },
+        { key: "loss-pct-warn",           label: qsTr("丢包率警告"),        unit: "%",    dec: 0 },
+        { key: "cooldown-sec",            label: qsTr("告警冷却窗口"),      unit: "s",    dec: 0 }
+    ]
+
+    readonly property var _ruleIds: [ "R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8", "R9", "R10" ]
+
+    // Banner state: engine off -> grey explicit; no vehicle -> grey idle;
+    // otherwise the highest-level active alert drives the color.
+    readonly property var    _activeAlerts:  customAlertEngine.activeAlerts
+    readonly property string _alertEngineState: customAlertEngine.state
+    readonly property bool   _hasVehicle: QGroundControl.multiVehicleManager.activeVehicle !== null
+    readonly property var    _topAlert: _alertEngineState === "ok" && _activeAlerts.length > 0 ? _activeAlerts[0] : null
+    readonly property color  _bannerColor: !_hasVehicle || _alertEngineState !== "ok" ? _alertGrey
+                                         : _alertLevelColor[_topAlert.level]
 
     ListModel { id: _messages }
 
@@ -183,6 +239,249 @@ Rectangle {
             QGCButton {
                 text:       qsTr("收起")
                 onClicked:  root.open = false
+            }
+        }
+
+        // ------------------------------------------------------------------
+        // Alert banner (local rule engine, read-only). Highest-level active
+        // alert first; grey = engine disabled or no vehicle (explicit states,
+        // never a stale alert). Click toggles the history list.
+        // ------------------------------------------------------------------
+        Rectangle {
+            Layout.fillWidth: true
+            implicitHeight: alertBannerText.implicitHeight + root._margin * 1.6
+            radius: ScreenTools.defaultBorderRadius
+            color: root._bannerColor
+            opacity: root._alertEngineState === "ok" ? 1.0 : 0.45
+
+            QGCLabel {
+                id: alertBannerText
+                anchors.left: parent.left
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                anchors.right: alertToggles.left
+                anchors.margins: root._margin * 0.8
+                wrapMode: Text.WordWrap
+                font.pointSize: ScreenTools.smallFontPointSize
+                color: root._alertEngineState === "ok" && root._topAlert ? "#1a1a1a" : qgcPal.text
+                text: {
+                    if (root._alertEngineState !== "ok") {
+                        return qsTr("告警引擎已停用")
+                    }
+                    if (!root._hasVehicle) {
+                        return qsTr("未连接载具 · 告警引擎待机")
+                    }
+                    if (!root._topAlert) {
+                        return qsTr("系统正常 · 无告警")
+                    }
+                    var text = qsTr("[%1] %2").arg(root._ruleName(root._topAlert.ruleId))
+                                               .arg(root._alertText(root._topAlert))
+                    if (root._activeAlerts.length > 1) {
+                        text += qsTr("　（另有 %1 条）").arg(root._activeAlerts.length - 1)
+                    }
+                    return text
+                }
+            }
+
+            RowLayout {
+                id: alertToggles
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.rightMargin: root._margin * 0.8
+                spacing: root._margin
+
+                QGCLabel {
+                    text: qsTr("历史")
+                    font.pointSize: ScreenTools.smallFontPointSize
+                    color: root.alertHistoryOpen ? "#1a1a1a" : qgcPal.text
+
+                    QGCMouseArea {
+                        anchors.fill: parent
+                        onClicked: root.alertHistoryOpen = !root.alertHistoryOpen
+                    }
+                }
+
+                QGCLabel {
+                    text: qsTr("设置")
+                    font.pointSize: ScreenTools.smallFontPointSize
+                    color: root.alertSettingsOpen ? "#1a1a1a" : qgcPal.text
+
+                    QGCMouseArea {
+                        anchors.fill: parent
+                        onClicked: root.alertSettingsOpen = !root.alertSettingsOpen
+                    }
+                }
+            }
+        }
+
+        // Alert history: newest first, capped by the engine (200 entries).
+        Rectangle {
+            Layout.fillWidth: true
+            implicitHeight: root.alertHistoryOpen ? ScreenTools.defaultFontPixelHeight * 10 : 0
+            visible: root.alertHistoryOpen
+            clip: true
+            color: qgcPal.windowShadeDark
+            radius: ScreenTools.defaultBorderRadius
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: root._margin * 0.5
+                spacing: root._margin * 0.3
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    QGCLabel {
+                        Layout.fillWidth: true
+                        text: qsTr("告警历史（最近在前，最多 200 条）")
+                        font.pointSize: ScreenTools.smallFontPointSize
+                        color: qgcPal.colorGrey
+                    }
+                    QGCLabel {
+                        text: root.alertHistoryOpen ? qsTr("收起▲") : qsTr("展开▼")
+                        font.pointSize: ScreenTools.smallFontPointSize
+                        color: qgcPal.colorGrey
+                    }
+                }
+
+                QGCListView {
+                    id: alertHistoryList
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    model: customAlertEngine.history
+                    spacing: 2
+                    clip: true
+
+                    delegate: Item {
+                        width: alertHistoryList.width
+                        height: historyLabel.implicitHeight + 2
+
+                        readonly property var _entry: model.modelData
+
+                        Rectangle {
+                            anchors.left: parent.left
+                            anchors.top: parent.top
+                            anchors.bottom: parent.bottom
+                            width: 3
+                            radius: 1
+                            color: root._alertLevelColor[root._entry ? root._entry.levelPeak : 0]
+                        }
+
+                        QGCLabel {
+                            id: historyLabel
+                            anchors.left: parent.left
+                            anchors.leftMargin: root._margin * 0.5
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            elide: Text.ElideRight
+                            font.pointSize: ScreenTools.smallFontPointSize
+                            color: qgcPal.text
+                            text: {
+                                var e = root._entry
+                                if (!e) {
+                                    return ""
+                                }
+                                var period = root._alertTimeString(e.raisedMs)
+                                         + (e.active ? qsTr(" 起 · 进行中")
+                                                     : qsTr(" ~ %1 恢复").arg(root._alertTimeString(e.recoveredMs)))
+                                return qsTr("%1 [%2·%3] %4").arg(period)
+                                    .arg(root._ruleName(e.ruleId))
+                                    .arg(e.levelPeak === 2 ? qsTr("严重") : e.levelPeak === 1 ? qsTr("警告") : qsTr("提示"))
+                                    .arg(root._alertText(e))
+                            }
+                        }
+                    }
+                }
+            }
+
+            QGCMouseArea {
+                anchors.top: parent.top
+                anchors.left: parent.left
+                anchors.right: parent.right
+                height: ScreenTools.defaultFontPixelHeight
+                onClicked: root.alertHistoryOpen = false
+            }
+        }
+
+        // Alert settings: master switch, per-rule switches, thresholds.
+        Rectangle {
+            Layout.fillWidth: true
+            implicitHeight: root.alertSettingsOpen ? alertSettingsColumn.implicitHeight + root._margin : 0
+            visible: root.alertSettingsOpen
+            clip: true
+            color: qgcPal.windowShadeDark
+            radius: ScreenTools.defaultBorderRadius
+
+            ColumnLayout {
+                id: alertSettingsColumn
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.margins: root._margin * 0.5
+                spacing: root._margin * 0.3
+
+                QGCCheckBox {
+                    text: qsTr("启用告警引擎")
+                    checked: customAlertEngine.enabled
+                    onClicked: customAlertEngine.enabled = checked
+                }
+
+                Flow {
+                    Layout.fillWidth: true
+                    spacing: root._margin
+
+                    Repeater {
+                        model: root._ruleIds
+                        delegate: QGCCheckBox {
+                            required property string modelData
+                            text: root._ruleName(modelData)
+                            font.pointSize: ScreenTools.smallFontPointSize
+                            checked: customAlertEngine.ruleEnabled(modelData)
+                            onClicked: customAlertEngine.setRuleEnabled(modelData, checked)
+                        }
+                    }
+                }
+
+                Repeater {
+                    model: root._thresholdDescriptors
+
+                    delegate: RowLayout {
+                        required property var modelData
+                        Layout.fillWidth: true
+
+                        QGCLabel {
+                            Layout.preferredWidth: ScreenTools.defaultFontPixelWidth * 11
+                            text: modelData.label
+                            font.pointSize: ScreenTools.smallFontPointSize
+                            color: qgcPal.text
+                        }
+
+                        QGCTextField {
+                            id: thresholdField
+                            Layout.preferredWidth: ScreenTools.defaultFontPixelWidth * 5
+                            font.pointSize: ScreenTools.smallFontPointSize
+                            text: Number(customAlertEngine.threshold(modelData.key)).toFixed(modelData.dec)
+                            onEditingFinished: {
+                                var value = Number(text)
+                                if (!isNaN(value)) {
+                                    customAlertEngine.setThreshold(modelData.key, value)
+                                }
+                                text = Number(customAlertEngine.threshold(modelData.key)).toFixed(modelData.dec)
+                            }
+                        }
+
+                        QGCLabel {
+                            text: modelData.unit
+                            font.pointSize: ScreenTools.smallFontPointSize
+                            color: qgcPal.colorGrey
+                        }
+                    }
+                }
+
+                QGCButton {
+                    text: qsTr("恢复默认阈值与规则开关")
+                    font.pointSize: ScreenTools.smallFontPointSize
+                    onClicked: customAlertEngine.resetAll()
+                }
             }
         }
 

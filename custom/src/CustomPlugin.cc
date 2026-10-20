@@ -1,4 +1,5 @@
 #include "CustomPlugin.h"
+#include "AlertEngine.h"
 #include "AssistantClient.h"
 #include "ModelRegistry.h"
 #include "TelemetryWsRelay.h"
@@ -41,6 +42,7 @@ CustomPlugin::CustomPlugin(QObject *parent)
     , _assistant(new AssistantClient(this))
     , _wsRelay(new TelemetryWsRelay(this))
     , _modelRegistry(new ModelRegistry(this))
+    , _alertEngine(new AlertEngine(this))
 {
     qCDebug(CustomLog) << this;
 
@@ -269,6 +271,10 @@ QQmlApplicationEngine* CustomPlugin::createQmlApplicationEngine(QObject* parent)
     // Both the floating 3D window and the built-in Viewer3D read from it; each
     // still builds its own RuntimeLoader instance.
     _qmlEngine->rootContext()->setContextProperty(QStringLiteral("customModelRegistry"), _modelRegistry);
+
+    // Expose the local deterministic alert rule engine (read-only, R1-R10) as
+    // `customAlertEngine`. It never sends anything to the flight controller.
+    _qmlEngine->rootContext()->setContextProperty(QStringLiteral("customAlertEngine"), _alertEngine);
 
     _urlInterceptor = new CustomOverrideInterceptor();
     _qmlEngine->addUrlInterceptor(_urlInterceptor);
