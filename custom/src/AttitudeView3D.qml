@@ -18,7 +18,9 @@ import "TelemetrySnapshot.js" as Telemetry
 /// fact binding inside DroneModelDjiF450. Process-in, zero network cost.
 /// Route B (Unity external, approved): same TelemetrySnapshot schema v1
 /// consumed over WebSocket. See coord/unity-route-b/ for the C# package.
-/// The WS broadcast endpoint is NOT yet implemented (separate work item).
+/// The Route-B loopback WS endpoint (ws://127.0.0.1:19390) is implemented
+/// here + in TelemetryWsRelay.cc; the non-loopback external bridge is still a
+/// separate work item pending an owner ruling.
 ///
 /// All three display routes (this floating window, QGC fullscreen Viewer3D,
 /// Unity window) are pure read-only consumers of the same Vehicle facts.
@@ -47,6 +49,7 @@ Rectangle {
 
     property var _gpsRef: null
     property var _snap:   null
+    property var _sceneItem: null
 
     width:  _openWidth
     height: (open && !detached) ? _openHeight : _titleHeight
@@ -73,11 +76,42 @@ Rectangle {
         return (v === null || v === undefined) ? "--" : Number(v).toFixed(digits) + (suffix || "")
     }
 
-    Component.onCompleted: {
-        _cam.lookAt(Qt.vector3d(0, 0, 0), 35, 55, 240)
-        _snapTimer.triggered()
-        px4WsRelay.startServer(19390)
+    // Route-B relay is only useful while the viewer is actually on screen, so
+    // start/stop it with (visible && open) instead of running it unconditionally.
+    function _updateRelay() {
+        if (root.visible && root.open) {
+            px4WsRelay.startServer(19390)
+        } else {
+            px4WsRelay.stopServer()
+        }
     }
+
+    // Qt Quick 3D does not support reparenting a View3D between windows, so the
+    // scene is (re)created inside whichever host is active: the embedded panel,
+    // or the detached top-level window.
+    function _rehostScene() {
+        if (_sceneItem) {
+            _sceneItem.destroy()
+            _sceneItem = null
+        }
+        var host = root.detached ? detachedWindow.contentItem : embeddedSceneHost
+        _sceneItem = sceneComponent.createObject(host)
+    }
+
+    onOpenChanged:      _updateRelay()
+    onVisibleChanged:   _updateRelay()
+    onDetachedChanged: {
+        _rehostScene()
+        _updateRelay()
+    }
+
+    Component.onCompleted: {
+        _snapTimer.triggered()
+        _rehostScene()
+        _updateRelay()
+    }
+
+    Component.onDestruction: px4WsRelay.stopServer()
 
     Connections {
         target: root.vehicle
@@ -99,15 +133,15 @@ Rectangle {
 
     //-------------------------------------------------------------------------
     //-- Route-B WebSocket broadcaster (schema v1, 10 Hz)
-    //-- ws://127.0.0.1:19390/telemetry  — read-only feed for the Unity viewer.
+    //-- ws://127.0.0.1:19390/telemetry  - read-only feed for the Unity viewer.
     //-- Lives here (not in FlyViewCustomLayer.qml) because TelemetrySnapshot.js
     //-- resolves inside this module's resource directory.
-    //-- Server is started from the root Component.onCompleted above.
+    //-- Server start/stop is driven by _updateRelay() above.
     Timer {
         id: _wsBroadcastTimer
         interval: 100
         repeat: true
-        running: true
+        running: root.visible && root.open
         onTriggered: px4WsRelay.broadcast(JSON.stringify(Telemetry.snapshot(root.vehicle)))
     }
 
@@ -199,299 +233,354 @@ Rectangle {
     }
 
     //-------------------------------------------------------------------------
-    // Standalone window (QGC PipView pattern): sceneArea is reparented into
-    // detachedWindow.contentItem while root.detached is true, and restored to
-    // the embedded panel when it returns to false.
+    // Standalone top-level window. The scene is instantiated here (not reparented)
+    // while root.detached is true; see _rehostScene() above.
     Window {
         id:                     detachedWindow
         visible:                root.detached
         title:                  qsTr("3D 姿态视图 · %1").arg(root.modelId)
         width:                  root._openWidth * 1.8
         height:                 root._openWidth * 1.3
+        color:                  "#16191f"
         onClosing:              root.detached = false
     }
 
-    //-------------------------------------------------------------------------
-    // 3D scene
+    // Embedded host: holds the scene while the panel is not detached.
     Item {
-        id: sceneArea
-        visible: root.open
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.top: titleBar.bottom
+        id: embeddedSceneHost
+        visible: root.open && !root.detached
+        anchors.left:   parent.left
+        anchors.right:  parent.right
+        anchors.top:    titleBar.bottom
         anchors.bottom: parent.bottom
         anchors.margins: root._margin
+    }
 
-        states: [
-            State {
-                name: "detached"
-                when: root.detached
+    //-------------------------------------------------------------------------
+    // Scene (View3D + camera + HUD + overlays). Instantiated by _rehostScene().
+    Component {
+        id: sceneComponent
 
-                AnchorChanges {
-                    target:         sceneArea
-                    anchors.top:    detachedWindow.contentItem.top
-                    anchors.bottom: detachedWindow.contentItem.bottom
-                    anchors.left:   detachedWindow.contentItem.left
-                    anchors.right:  detachedWindow.contentItem.right
-                }
-
-                ParentChange {
-                    target: sceneArea
-                    parent: detachedWindow.contentItem
-                }
-            }
-        ]
-
-        View3D {
-            id: view3d
+        Item {
+            id: sceneArea
             anchors.fill: parent
 
-            camera: standAloneScene.cameraOne
-
-            environment: SceneEnvironment {
-                antialiasingMode: SceneEnvironment.MSAA
-                antialiasingQuality: SceneEnvironment.Medium
-                backgroundMode: SceneEnvironment.Color
-                clearColor: "#16191f"
+            Viewer3DCameraController {
+                id: _cam
+                viewportSize: Qt.size(view3d.width, view3d.height)
+                fieldOfView: standAloneScene.cameraOne.fieldOfView
             }
 
-            importScene: Node {
-                CameraLightModel {
-                    id: standAloneScene
-                    cameraHeading: _cam.heading
-                    cameraTilt: _cam.tilt
-                    cameraZoom: _cam.distance
-                    orbitCenter: _cam.orbitCenter
-                    viewDistance: 8000
+            View3D {
+                id: view3d
+                anchors.fill: parent
+
+                camera: standAloneScene.cameraOne
+
+                environment: SceneEnvironment {
+                    antialiasingMode: SceneEnvironment.MSAA
+                    antialiasingQuality: SceneEnvironment.Medium
+                    backgroundMode: SceneEnvironment.Color
+                    clearColor: "#16191f"
                 }
 
-                Model {
-                    source: "#Rectangle"
-                    scale: Qt.vector3d(600, 600, 1)
-                    materials: PrincipledMaterial {
-                        baseColor: "#232833"
-                        roughness: 1.0
+                importScene: Node {
+                    CameraLightModel {
+                        id: standAloneScene
+                        cameraHeading: _cam.heading
+                        cameraTilt: _cam.tilt
+                        cameraZoom: _cam.distance
+                        orbitCenter: _cam.orbitCenter
+                        viewDistance: 8000
+                    }
+
+                    Model {
+                        source: "#Rectangle"
+                        scale: Qt.vector3d(600, 600, 1)
+                        materials: PrincipledMaterial {
+                            baseColor: "#232833"
+                            roughness: 1.0
+                        }
+                    }
+
+                    AxisHelper {
+                        enableXZGrid: false
+                        enableXYGrid: true
+                        enableYZGrid: false
+                        enableAxisLines: false
+                        gridOpacity: 0.25
+                        gridColor: "#8a93a6"
+                    }
+
+                    // Airframe - pick model by registry id
+                    // Direct binding (DroneModelDjiF450 already has modelScale)
+                    Node {
+                        id: airframe
+
+                        DroneModelDjiF450 {
+                            id: djiF450
+                            vehicle: root.vehicle
+                            gpsRef: root._gpsRef ? root._gpsRef
+                                                      : QtPositioning.coordinate(0, 0, 0)
+                            visible: root.modelId === "dji_f450"
+                        }
                     }
                 }
-
-                AxisHelper {
-                    enableXZGrid: false
-                    enableXYGrid: true
-                    enableYZGrid: false
-                    enableAxisLines: false
-                    gridOpacity: 0.25
-                    gridColor: "#8a93a6"
-                }
-
-                // Airframe - pick model by registry id
-                // Direct binding (DroneModelDjiF450 already has modelScale)
-                Node {
-                    id: airframe
-
-                    DroneModelDjiF450 {
-                        id: djiF450
-                        vehicle: root.vehicle
-                        gpsRef: root._gpsRef ? root._gpsRef
-                                                  : QtPositioning.coordinate(0, 0, 0)
-                        visible: root.modelId === "dji_f450"
-                    }
-                }
             }
-        }
-
-        Viewer3DCameraController {
-            id: _cam
-            viewportSize: Qt.size(view3d.width, view3d.height)
-            fieldOfView: standAloneScene.cameraOne.fieldOfView
-        }
-
-        Connections {
-            target: djiF450
-            enabled: root.followCamera && root.open && root.visible
-            function onPositionChanged() {
-                _cam.orbitCenter = djiF450.position
-            }
-        }
-
-        MouseArea {
-            anchors.fill: view3d
-            acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
-            onPressed: function(mouse) {
-                if (mouse.button === Qt.LeftButton) {
-                    _cam.beginOrbit(Qt.point(mouse.x, mouse.y))
-                } else {
-                    _cam.beginPan(Qt.point(mouse.x, mouse.y))
-                }
-            }
-            onPositionChanged: function(mouse) {
-                if (pressedButtons & Qt.LeftButton) {
-                    _cam.orbitTo(Qt.point(mouse.x, mouse.y))
-                } else if (pressedButtons & (Qt.RightButton | Qt.MiddleButton)) {
-                    _cam.panTo(Qt.point(mouse.x, mouse.y))
-                }
-            }
-            onWheel: function(wheel) {
-                _cam.zoom(wheel.angleDelta.y, Qt.point(wheel.x, wheel.y))
-            }
-        }
-
-        //---------------------------------------------------------------------
-        // HUD (left-top, complementary to on-model labels)
-        Rectangle {
-            anchors.left: parent.left
-            anchors.top: parent.top
-            anchors.margins: root._margin
-            width: hudColumn.width + root._margin * 2
-            height: hudColumn.height + root._margin * 2
-            color: Qt.rgba(0, 0, 0, 0.45)
-            radius: 3
-
-            Column {
-                id: hudColumn
-                anchors.centerIn: parent
-                spacing: 1
-
-                QGCLabel {
-                    text: {
-                        if (!root._snap) return qsTr("等待载具…")
-                        var mode = root._snap.status.flight_mode || qsTr("未知模式")
-                        var armed = root._snap.status.armed
-                        return mode + " · " + (armed ? qsTr("已解锁") : qsTr("未解锁"))
-                    }
-                    color: (root._snap && root._snap.status.armed) ? "#ff6666" : "#7fe07f"
-                    font.pointSize: ScreenTools.smallFontPointSize
-                }
-                QGCLabel {
-                    text: root._snap ?
-                        qsTr("高度 ") + root._fmt(root._snap.position.altitude_rel_m, 1, " m") +
-                        qsTr("  地速 ") + root._fmt(root._snap.speed.ground_m_s, 1, " m/s") +
-                        qsTr("  爬升 ") + root._fmt(root._snap.speed.climb_m_s, 1, " m/s") : "--"
-                    color: "white"
-                    font.pointSize: ScreenTools.smallFontPointSize
-                }
-                QGCLabel {
-                    text: root._snap ?
-                        qsTr("电量 ") + root._fmt(root._snap.status.battery_pct, 0, " %") +
-                        qsTr("  GPS ") + root._fmt(root._snap.status.gps_sats, 0, qsTr(" 星")) : "--"
-                    color: "white"
-                    font.pointSize: ScreenTools.smallFontPointSize
-                }
-            }
-        }
-
-        //---------------------------------------------------------------------
-        // On-model labels: project drone 3D position to screen via
-        // View3D.mapFrom3DScene(). Qt 6.11 native, no Text3D dependency.
-        Item {
-            id: labelsOverlay
-            anchors.fill: view3d
-            visible: root.showModelLabels && root._snap && root.open
-
-            readonly property point _droneScreen: view3d.mapFrom3DScene(djiF450.position)
 
             Connections {
                 target: djiF450
+                enabled: root.followCamera && root.open && root.visible
                 function onPositionChanged() {
-                    rpyLabel.x = labelsOverlay._droneScreen.x - rpyLabel.width / 2
-                    rpyLabel.y = labelsOverlay._droneScreen.y - rpyLabel.height - 10
-                    speedLabel.x = labelsOverlay._droneScreen.x - speedLabel.width / 2
-                    speedLabel.y = labelsOverlay._droneScreen.y + 10
-                    statusLabel.x = labelsOverlay._droneScreen.x - statusLabel.width / 2
-                    statusLabel.y = labelsOverlay._droneScreen.y + statusLabel.height + 14
+                    _cam.orbitCenter = djiF450.position
                 }
             }
 
-            Rectangle {
-                id: rpyLabel
-                radius: 3
-                color: Qt.rgba(0, 0, 0, 0.55)
-                border.color: "#7fe07f"
-                border.width: 1
-                antialiasing: true
-
-                QGCLabel {
-                    anchors.fill: parent
-                    anchors.margins: 6
-                    text: {
-                        var s = root._snap; if (!s) return ""
-                        return "R" + root._fmt(s.attitude_deg.roll, 1, qsTr("°")) +
-                               " P" + root._fmt(s.attitude_deg.pitch, 1, qsTr("°")) +
-                               " Y" + root._fmt(s.attitude_deg.yaw, 1, qsTr("°"))
+            MouseArea {
+                anchors.fill: view3d
+                acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
+                onPressed: function(mouse) {
+                    if (mouse.button === Qt.LeftButton) {
+                        _cam.beginOrbit(Qt.point(mouse.x, mouse.y))
+                    } else {
+                        _cam.beginPan(Qt.point(mouse.x, mouse.y))
                     }
-                    color: "#7fe07f"
-                    font.pointSize: ScreenTools.smallFontPointSize
+                }
+                onPositionChanged: function(mouse) {
+                    if (pressedButtons & Qt.LeftButton) {
+                        _cam.orbitTo(Qt.point(mouse.x, mouse.y))
+                    } else if (pressedButtons & (Qt.RightButton | Qt.MiddleButton)) {
+                        _cam.panTo(Qt.point(mouse.x, mouse.y))
+                    }
+                }
+                onWheel: function(wheel) {
+                    _cam.zoom(wheel.angleDelta.y, Qt.point(wheel.x, wheel.y))
                 }
             }
 
+            //-----------------------------------------------------------------
+            // HUD (left-top, complementary to on-model labels)
+            //   line 1 : flight mode · arm state · attitude   (primary)
+            //   row 2  : altitude / groundspeed / climb / battery / GPS in
+            //            separate columns so labels can never overlap   (readout)
             Rectangle {
-                id: speedLabel
+                anchors.left: parent.left
+                anchors.top: parent.top
+                anchors.margins: root._margin
+                width: hudColumn.width + root._margin * 2
+                height: hudColumn.height + root._margin * 2
+                color: Qt.rgba(0, 0, 0, 0.5)
                 radius: 3
-                color: Qt.rgba(0, 0, 0, 0.55)
-                border.color: "#ffffff"
-                border.width: 1
-                antialiasing: true
 
-                QGCLabel {
-                    anchors.fill: parent
-                    anchors.margins: 6
-                    text: {
-                        var s = root._snap; if (!s) return ""
-                        return root._fmt(s.speed.ground_m_s, 1, qsTr("m/s")) +
-                               "  " + qsTr("高度") + " " +
-                               root._fmt(s.position.altitude_rel_m, 1, qsTr("m"))
+                Column {
+                    id: hudColumn
+                    anchors.centerIn: parent
+                    spacing: root._margin
+
+                    QGCLabel {
+                        text: {
+                            var s = root._snap
+                            if (!s) return qsTr("等待载具…")
+                            var mode = s.status.flight_mode || qsTr("未知模式")
+                            var arm = s.status.armed ? qsTr("已解锁") : qsTr("未解锁")
+                            var att = qsTr("姿态 ") +
+                                      "R" + root._fmt(s.attitude_deg.roll, 1, qsTr("°")) +
+                                      " P" + root._fmt(s.attitude_deg.pitch, 1, qsTr("°")) +
+                                      " Y" + root._fmt(s.attitude_deg.yaw, 1, qsTr("°"))
+                            return mode + " · " + arm + "    " + att
+                        }
+                        color: (root._snap && root._snap.status.armed) ? "#ff6666" : "#7fe07f"
+                        font.pointSize: ScreenTools.mediumFontPointSize
                     }
-                    color: "white"
-                    font.pointSize: ScreenTools.smallFontPointSize
+
+                    Row {
+                        spacing: root._margin * 3
+
+                        Column {
+                            spacing: 1
+                            QGCLabel {
+                                text: qsTr("高度")
+                                color: "#9aa3b2"
+                                font.pointSize: ScreenTools.smallFontPointSize
+                            }
+                            QGCLabel {
+                                text: root._snap ? root._fmt(root._snap.position.altitude_rel_m, 1, " m") : "--"
+                                color: "white"
+                                font.pointSize: ScreenTools.defaultFontPointSize
+                            }
+                        }
+
+                        Column {
+                            spacing: 1
+                            QGCLabel {
+                                text: qsTr("地速")
+                                color: "#9aa3b2"
+                                font.pointSize: ScreenTools.smallFontPointSize
+                            }
+                            QGCLabel {
+                                text: root._snap ? root._fmt(root._snap.speed.ground_m_s, 1, " m/s") : "--"
+                                color: "white"
+                                font.pointSize: ScreenTools.defaultFontPointSize
+                            }
+                        }
+
+                        Column {
+                            spacing: 1
+                            QGCLabel {
+                                text: qsTr("爬升")
+                                color: "#9aa3b2"
+                                font.pointSize: ScreenTools.smallFontPointSize
+                            }
+                            QGCLabel {
+                                text: root._snap ? root._fmt(root._snap.speed.climb_m_s, 1, " m/s") : "--"
+                                color: "white"
+                                font.pointSize: ScreenTools.defaultFontPointSize
+                            }
+                        }
+
+                        Column {
+                            spacing: 1
+                            QGCLabel {
+                                text: qsTr("电量")
+                                color: "#9aa3b2"
+                                font.pointSize: ScreenTools.smallFontPointSize
+                            }
+                            QGCLabel {
+                                text: root._snap ? root._fmt(root._snap.status.battery_pct, 0, " %") : "--"
+                                color: "white"
+                                font.pointSize: ScreenTools.defaultFontPointSize
+                            }
+                        }
+
+                        Column {
+                            spacing: 1
+                            QGCLabel {
+                                text: qsTr("GPS")
+                                color: "#9aa3b2"
+                                font.pointSize: ScreenTools.smallFontPointSize
+                            }
+                            QGCLabel {
+                                text: root._snap ? root._fmt(root._snap.status.gps_sats, 0, qsTr(" 星")) : "--"
+                                color: "white"
+                                font.pointSize: ScreenTools.defaultFontPointSize
+                            }
+                        }
+                    }
                 }
             }
 
-            Rectangle {
-                id: statusLabel
-                radius: 3
-                color: Qt.rgba(0, 0, 0, 0.55)
-                border.color: {
-                    var s = root._snap
-                    return (s && s.status.armed) ? "#ff6666" : "#8a93a6"
-                }
-                border.width: 1
-                antialiasing: true
+            //-----------------------------------------------------------------
+            // On-model labels: project drone 3D position to screen via
+            // View3D.mapFrom3DScene(). Qt 6.11 native, no Text3D dependency.
+            Item {
+                id: labelsOverlay
+                anchors.fill: view3d
+                visible: root.showModelLabels && root.open && root.vehicle !== null && _projValid
 
-                QGCLabel {
-                    anchors.fill: parent
-                    anchors.margins: 6
-                    text: {
-                        var s = root._snap; if (!s) return ""
-                        var mode = s.status.flight_mode || "--"
-                        return mode + "  " + (s.status.armed ? qsTr("ARMED") : qsTr("DISARMED"))
+                // Vehicle model -> screen projection. Re-evaluated on every 10 Hz
+                // telemetry tick (root._snap) and on View3D resize, so it never
+                // keeps a stale point captured before the camera was resolvable.
+                readonly property point _droneScreen: {
+                    if (!root._snap || view3d.width <= 0 || view3d.height <= 0) {
+                        return Qt.point(-100000, -100000)
                     }
-                    color: {
+                    var p = view3d.mapFrom3DScene(djiF450.position)
+                    if (!p || isNaN(p.x) || isNaN(p.y)) {
+                        return Qt.point(-100000, -100000)
+                    }
+                    return p
+                }
+                readonly property bool _projValid: _droneScreen.x > -50000
+
+                Rectangle {
+                    id: rpyLabel
+                    x: labelsOverlay._droneScreen.x - width / 2
+                    y: labelsOverlay._droneScreen.y - height - 10
+                    radius: 3
+                    color: Qt.rgba(0, 0, 0, 0.55)
+                    border.color: "#7fe07f"
+                    border.width: 1
+                    antialiasing: true
+
+                    QGCLabel {
+                        anchors.fill: parent
+                        anchors.margins: 6
+                        text: {
+                            var s = root._snap; if (!s) return ""
+                            return "R" + root._fmt(s.attitude_deg.roll, 1, qsTr("°")) +
+                                   " P" + root._fmt(s.attitude_deg.pitch, 1, qsTr("°")) +
+                                   " Y" + root._fmt(s.attitude_deg.yaw, 1, qsTr("°"))
+                        }
+                        color: "#7fe07f"
+                        font.pointSize: ScreenTools.defaultFontPointSize
+                    }
+                }
+
+                Rectangle {
+                    id: speedLabel
+                    x: labelsOverlay._droneScreen.x - width / 2
+                    y: labelsOverlay._droneScreen.y + 10
+                    radius: 3
+                    color: Qt.rgba(0, 0, 0, 0.55)
+                    border.color: "#ffffff"
+                    border.width: 1
+                    antialiasing: true
+
+                    QGCLabel {
+                        anchors.fill: parent
+                        anchors.margins: 6
+                        text: {
+                            var s = root._snap; if (!s) return ""
+                            return root._fmt(s.speed.ground_m_s, 1, qsTr("m/s")) +
+                                   "  " + qsTr("高度") + " " +
+                                   root._fmt(s.position.altitude_rel_m, 1, qsTr("m"))
+                        }
+                        color: "white"
+                        font.pointSize: ScreenTools.defaultFontPointSize
+                    }
+                }
+
+                Rectangle {
+                    id: statusLabel
+                    x: labelsOverlay._droneScreen.x - width / 2
+                    y: labelsOverlay._droneScreen.y + height + 14
+                    radius: 3
+                    color: Qt.rgba(0, 0, 0, 0.55)
+                    border.color: {
                         var s = root._snap
                         return (s && s.status.armed) ? "#ff6666" : "#8a93a6"
                     }
-                    font.pointSize: ScreenTools.smallFontPointSize
+                    border.width: 1
+                    antialiasing: true
+
+                    QGCLabel {
+                        anchors.fill: parent
+                        anchors.margins: 6
+                        text: {
+                            var s = root._snap; if (!s) return ""
+                            var mode = s.status.flight_mode || "--"
+                            return mode + "  " + (s.status.armed ? qsTr("ARMED") : qsTr("DISARMED"))
+                        }
+                        color: {
+                            var s = root._snap
+                            return (s && s.status.armed) ? "#ff6666" : "#8a93a6"
+                        }
+                        font.pointSize: ScreenTools.defaultFontPointSize
+                    }
                 }
             }
 
-            // Initial positioning, deferred because the View3D camera is not
-            // resolvable until the scene graph has had a chance to init.
-            Component.onCompleted: Qt.callLater(function() {
-                rpyLabel.x = labelsOverlay._droneScreen.x - rpyLabel.width / 2
-                rpyLabel.y = labelsOverlay._droneScreen.y - rpyLabel.height - 10
-                speedLabel.x = labelsOverlay._droneScreen.x - speedLabel.width / 2
-                speedLabel.y = labelsOverlay._droneScreen.y + 10
-                statusLabel.x = labelsOverlay._droneScreen.x - statusLabel.width / 2
-                statusLabel.y = labelsOverlay._droneScreen.y + statusLabel.height + 14
-            })
-        }
+            QGCLabel {
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                anchors.margins: root._margin
+                text: qsTr("左键环绕 · 右键平移 · 滚轮缩放")
+                color: "white"
+                opacity: 0.5
+                font.pointSize: ScreenTools.smallFontPointSize
+            }
 
-        QGCLabel {
-            anchors.right: parent.right
-            anchors.bottom: parent.bottom
-            anchors.margins: root._margin
-            text: qsTr("左键环绕 · 右键平移 · 滚轮缩放")
-            color: "white"
-            opacity: 0.5
-            font.pointSize: ScreenTools.smallFontPointSize
+            Component.onCompleted: _cam.lookAt(Qt.vector3d(0, 0, 0), 35, 55, 240)
         }
     }
 }

@@ -11,7 +11,7 @@
 /// (QML side), broadcasts to all connected WS clients at 10 Hz.
 ///
 /// This class ONLY owns the WS server and connected sockets. It does NOT
-/// touch Vehicle facts directly — the QML side builds the payload so there
+/// touch Vehicle facts directly - the QML side builds the payload so there
 /// is exactly one source of truth for schema v1 (TelemetrySnapshot.js).
 ///
 /// Endpoint: ws://127.0.0.1:19390/telemetry
