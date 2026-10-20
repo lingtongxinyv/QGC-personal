@@ -1,6 +1,7 @@
 #include "ModelRegistry.h"
 
 #include <QtCore/QDir>
+#include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QSettings>
 
@@ -21,6 +22,30 @@ bool isSupportedModel(const QString &path)
         if (suffix == QLatin1String(kSupportedSuffixes[i])) {
             return true;
         }
+    }
+    return false;
+}
+
+/// An .obj carries no material of its own: it only names a .mtl through the
+/// `mtllib` directive. Qt's loader silently drops textures when that file is
+/// missing, so the registry can only warn honestly if it checks for it.
+bool objHasMaterial(const QString &path)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        return false;
+    }
+    const QString dir = QFileInfo(path).absolutePath();
+    while (!file.atEnd()) {
+        const QByteArray line = file.readLine(512);
+        if (!line.startsWith("mtllib")) {
+            continue;
+        }
+        const QString lib = QString::fromUtf8(line.mid(6)).trimmed();
+        if (lib.isEmpty()) {
+            return false;
+        }
+        return QFileInfo(dir + QLatin1Char('/') + lib).exists();
     }
     return false;
 }
@@ -97,6 +122,10 @@ void ModelRegistry::resetToBuiltin()
     _noticeLevel.clear();
     _noticeDetail.clear();
     _persist();
+    // The trim only makes sense for the asset it was dialed in for; leaving it
+    // behind would silently rotate the next import.
+    QSettings settings;
+    settings.remove(QLatin1String(kModelYawKey));
     emit changed();
 }
 
@@ -118,12 +147,22 @@ void ModelRegistry::setExternalYawDeg(int deg)
 void ModelRegistry::reportLoadResult(bool ok, const QString &detail)
 {
     if (!ok) {
+        // The scene could not build this asset. Dropping the selection here
+        // keeps a broken file from being re-selected on the next start (the
+        // old code pushed it into settings and only complained afterwards).
+        _externalPath.clear();
+        _externalYawDeg = 0;
+        QSettings settings;
+        settings.remove(QLatin1String(kModelPathKey));
+        settings.remove(QLatin1String(kModelYawKey));
         _setNotice(QStringLiteral("load-failed"), QStringLiteral("error"), detail);
+        emit changed();
         return;
     }
-    // A readable .obj carries geometry but Qt's loader degrades silently when
-    // the .mtl is missing, so say so up front instead of hiding it.
-    if (QFileInfo(_externalPath).suffix().compare(QLatin1String("obj"), Qt::CaseInsensitive) == 0) {
+    // Only say "approximate" when the .mtl really is missing; a fully
+    // textured .obj must not be reported as degraded.
+    if (QFileInfo(_externalPath).suffix().compare(QLatin1String("obj"), Qt::CaseInsensitive) == 0
+        && !objHasMaterial(_externalPath)) {
         _setNotice(QStringLiteral("obj-approximate"), QStringLiteral("info"), QString());
     } else {
         _setNotice(QString(), QString(), QString());

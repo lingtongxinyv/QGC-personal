@@ -92,9 +92,12 @@ Rectangle {
         case "folder-no-model":
             return qsTr("该文件夹内未找到 .glb / .gltf / .obj 模型文件：") + detail
         case "load-failed":
-            return qsTr("模型加载失败：") + detail
+            // "empty-mesh" is an ASCII token from the QML loader probe, not a
+            // user-facing string, so it gets its own wording here.
+            return qsTr("模型加载失败：")
+                   + (detail === "empty-mesh" ? qsTr("该文件中没有可显示的几何体") : detail)
         case "obj-approximate":
-            return qsTr("OBJ 已加载；若源文件缺少 .mtl，将自动降级为无贴图")
+            return qsTr("OBJ 已加载，但未找到其材质库（.mtl），已降级为无贴图显示")
         default:
             return code
         }

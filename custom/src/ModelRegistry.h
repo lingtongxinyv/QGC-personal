@@ -54,6 +54,9 @@ public:
     /// usual glTF convention. Value is kept in [0, 360).
     Q_INVOKABLE void setExternalYawDeg(int deg);
     /// Called once QML's RuntimeLoader has a result for the current asset.
+    /// A failure drops the selection *and* its persisted keys, so the panel
+    /// falls back to the built-in dji_f450 instead of re-selecting a broken
+    /// file on the next start.
     Q_INVOKABLE void reportLoadResult(bool ok, const QString &detail);
     Q_INVOKABLE void dismissNotice();
 

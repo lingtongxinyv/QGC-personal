@@ -191,14 +191,38 @@ Node {
                     onStatusChanged: _report()
                     onBoundsChanged: _report()
 
+                    // Some importers report Success for a file they parsed
+                    // into an empty scene (a damaged .obj is the common case),
+                    // so status alone cannot be trusted. Bounds are not
+                    // available on the same tick as the status change, hence
+                    // the short grace period before declaring the asset empty.
+                    Timer {
+                        id: emptyCheckTimer
+
+                        interval: 1500
+                        repeat: false
+                        onTriggered: {
+                            if (externalLoader.status === RuntimeLoader.Success
+                                    && externalLoader._extent <= 0.001) {
+                                customModelRegistry.reportLoadResult(false, "empty-mesh")
+                            }
+                        }
+                    }
+
                     function _report() {
-                        // Bounds are also reported once the asset finishes
-                        // loading; the Error branch keeps a failure from being
-                        // swallowed by the _extent guard below.
                         if (status === RuntimeLoader.Error) {
+                            emptyCheckTimer.stop()
                             customModelRegistry.reportLoadResult(false, errorString)
-                        } else if (status === RuntimeLoader.Success && _extent > 0.001) {
+                            return
+                        }
+                        if (status !== RuntimeLoader.Success) {
+                            return
+                        }
+                        if (_extent > 0.001) {
+                            emptyCheckTimer.stop()
                             customModelRegistry.reportLoadResult(true, "")
+                        } else if (!emptyCheckTimer.running) {
+                            emptyCheckTimer.start()
                         }
                     }
                 }
