@@ -56,8 +56,10 @@ public:
     /// Called once QML's RuntimeLoader has a result for the current asset.
     /// A failure drops the selection *and* its persisted keys, so the panel
     /// falls back to the built-in dji_f450 instead of re-selecting a broken
-    /// file on the next start.
-    Q_INVOKABLE void reportLoadResult(bool ok, const QString &detail);
+    /// file on the next start. `source` (when non-empty) must match the
+    /// current selection's URL, otherwise the result came from a stale loader
+    /// instance serving a previous pick and is ignored.
+    Q_INVOKABLE void reportLoadResult(bool ok, const QString &detail, const QString &source = QString());
     Q_INVOKABLE void dismissNotice();
 
 signals:

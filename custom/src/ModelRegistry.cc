@@ -36,7 +36,9 @@ bool objHasMaterial(const QString &path)
         return false;
     }
     const QString dir = QFileInfo(path).absolutePath();
-    while (!file.atEnd()) {
+    // Scan only the header region: mtllib directives sit at the top of the
+    // file, and reading a large .obj to EOF here would stall the GUI thread.
+    for (int lines = 0; lines < 1000 && !file.atEnd(); ++lines) {
         const QByteArray line = file.readLine(512);
         if (!line.startsWith("mtllib")) {
             continue;
@@ -144,8 +146,13 @@ void ModelRegistry::setExternalYawDeg(int deg)
     emit changed();
 }
 
-void ModelRegistry::reportLoadResult(bool ok, const QString &detail)
+void ModelRegistry::reportLoadResult(bool ok, const QString &detail, const QString &source)
 {
+    // A loader instance can outlive the selection that spawned it; a late
+    // result from such a stale loader must not clear (or bless) the new pick.
+    if (!source.isEmpty() && source != externalUrl()) {
+        return;
+    }
     if (!ok) {
         // The scene could not build this asset. Dropping the selection here
         // keeps a broken file from being re-selected on the next start (the

@@ -204,7 +204,7 @@ Node {
                         onTriggered: {
                             if (externalLoader.status === RuntimeLoader.Success
                                     && externalLoader._extent <= 0.001) {
-                                customModelRegistry.reportLoadResult(false, "empty-mesh")
+                                customModelRegistry.reportLoadResult(false, "empty-mesh", String(externalLoader.source))
                             }
                         }
                     }
@@ -212,7 +212,7 @@ Node {
                     function _report() {
                         if (status === RuntimeLoader.Error) {
                             emptyCheckTimer.stop()
-                            customModelRegistry.reportLoadResult(false, errorString)
+                            customModelRegistry.reportLoadResult(false, errorString, String(externalLoader.source))
                             return
                         }
                         if (status !== RuntimeLoader.Success) {
@@ -220,7 +220,7 @@ Node {
                         }
                         if (_extent > 0.001) {
                             emptyCheckTimer.stop()
-                            customModelRegistry.reportLoadResult(true, "")
+                            customModelRegistry.reportLoadResult(true, "", String(externalLoader.source))
                         } else if (!emptyCheckTimer.running) {
                             emptyCheckTimer.start()
                         }
