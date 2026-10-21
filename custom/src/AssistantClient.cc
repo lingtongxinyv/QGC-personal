@@ -33,11 +33,17 @@ QString normalizedBaseUrl()
     return url;
 }
 
-QStringList tokenFileCandidates()
+QStringList tokenFileCandidates(const QString &instanceOverride)
 {
     QStringList candidates;
 
-    // Explicit override always wins.
+    // Endpoint-specific token (embedded launcher) always wins: it belongs to the
+    // instance the panel actually talks to.
+    if (!instanceOverride.isEmpty()) {
+        candidates << instanceOverride;
+    }
+
+    // Explicit override next.
     const QString explicitFile = qEnvironmentVariable("PX4_AGENT_TOKEN_FILE");
     if (!explicitFile.isEmpty()) {
         candidates << explicitFile;
@@ -93,12 +99,57 @@ void AssistantClient::reloadToken()
     probeHealth();
 }
 
+void AssistantClient::setEndpoint(const QString &baseUrl, const QString &tokenFile)
+{
+    QString url = baseUrl.trimmed();
+    while (url.endsWith(QLatin1Char('/'))) {
+        url.chop(1);
+    }
+    if (url.isEmpty()) {
+        url = _baseUrl;
+    }
+
+    bool changed = false;
+    if (url != _baseUrl) {
+        _baseUrl = url;
+        changed = true;
+    }
+    if (tokenFile.trimmed() != _tokenFileOverride) {
+        _tokenFileOverride = tokenFile.trimmed();
+        changed = true;
+    }
+    if (!changed) {
+        return;
+    }
+
+    qCDebug(AssistantClientLog) << "endpoint set to" << _baseUrl
+                                << "token file:" << (_tokenFileOverride.isEmpty()
+                                                     ? QStringLiteral("<defaults>")
+                                                     : _tokenFileOverride);
+
+    // In-flight requests belong to the previous instance: drop them.
+    if (_chatReply) {
+        _chatReply->abort();
+    }
+    if (_healthReply) {
+        _healthReply->abort();
+        _healthReply = nullptr;
+    }
+    _sessionId.clear();
+    _setHealth(QStringLiteral("unknown"), QString());
+
+    emit baseUrlChanged();
+
+    _loadToken();
+    probeHealth();
+}
+
 void AssistantClient::_loadToken()
 {
     const QString oldToken = _token;
     _token.clear();
 
-    for (const QString &path : tokenFileCandidates()) {
+    for (const QString &path : tokenFileCandidates(_tokenFileOverride)) {
         QFile file(path);
         if (!file.exists() || !file.open(QIODevice::ReadOnly)) {
             continue;

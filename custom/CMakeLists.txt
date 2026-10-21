@@ -132,6 +132,8 @@ set(CUSTOM_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/AlertNarrator.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/AssistantClient.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/src/AssistantClient.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/EmbeddedDshLauncher.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/EmbeddedDshLauncher.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/TelemetryWsRelay.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/src/TelemetryWsRelay.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ModelRegistry.cc
@@ -182,3 +184,25 @@ set(CUSTOM_QT_COMPONENTS
 )
 
 find_package(Qt6 COMPONENTS WebSockets REQUIRED)
+
+# ============================================================================
+# Embedded DSH Runtime (optional payload)
+# ============================================================================
+# Ships the bundled DeepSeek Harness beside QGroundControl:
+#   <bindir>/dsh/dsh-px4.exe   (PX4_EMBEDDED_DSH_EXE)
+#   <bindir>/dsh/home/         (PX4_EMBEDDED_DSH_HOME, DSH_HOME template)
+set(PX4_EMBEDDED_DSH_EXE "" CACHE FILEPATH "Bundled single-file DSH runtime (dsh-px4.exe)")
+set(PX4_EMBEDDED_DSH_HOME "" CACHE PATH "DSH_HOME template directory shipped as dsh/home")
+set(PX4_EMBEDDED_DSH_LICENSE "" CACHE FILEPATH "DeepSeek Harness LICENSE (MIT) shipped with the runtime")
+if(PX4_EMBEDDED_DSH_EXE AND EXISTS "${PX4_EMBEDDED_DSH_EXE}")
+    install(FILES "${PX4_EMBEDDED_DSH_EXE}" DESTINATION "${CMAKE_INSTALL_BINDIR}/dsh")
+    message(STATUS "QGC: embedded DSH runtime: ${PX4_EMBEDDED_DSH_EXE}")
+endif()
+if(PX4_EMBEDDED_DSH_LICENSE AND EXISTS "${PX4_EMBEDDED_DSH_LICENSE}")
+    install(FILES "${PX4_EMBEDDED_DSH_LICENSE}" DESTINATION "${CMAKE_INSTALL_BINDIR}/dsh"
+            RENAME LICENSE-deepseek-harness.txt)
+endif()
+if(PX4_EMBEDDED_DSH_HOME AND EXISTS "${PX4_EMBEDDED_DSH_HOME}")
+    install(DIRECTORY "${PX4_EMBEDDED_DSH_HOME}/" DESTINATION "${CMAKE_INSTALL_BINDIR}/dsh/home")
+    message(STATUS "QGC: embedded DSH home: ${PX4_EMBEDDED_DSH_HOME}")
+endif()

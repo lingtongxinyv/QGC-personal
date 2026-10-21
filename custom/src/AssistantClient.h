@@ -25,7 +25,7 @@ class QTimer;
 class AssistantClient : public QObject
 {
     Q_OBJECT
-    Q_PROPERTY(QString baseUrl     READ baseUrl     CONSTANT)
+    Q_PROPERTY(QString baseUrl     READ baseUrl     NOTIFY baseUrlChanged)
     Q_PROPERTY(QString token       READ token       NOTIFY tokenChanged)
     Q_PROPERTY(bool    tokenFound  READ tokenFound  NOTIFY tokenChanged)
     Q_PROPERTY(QString healthState READ healthState NOTIFY healthChanged)  // unknown|ok|fail
@@ -42,6 +42,10 @@ public:
     QString healthDetail() const { return _healthDetail; }
     bool busy() const { return _busy; }
 
+    /// Point the client at a specific DSH instance (embedded launcher or dev override).
+    /// Empty values keep the current/default endpoint. Re-reads the token and reprobes.
+    void setEndpoint(const QString &baseUrl, const QString &tokenFile);
+
     /// Probe GET /px4-agent/health. Safe to call repeatedly.
     Q_INVOKABLE void probeHealth();
     /// Re-read the panel-token from disk (after a DSH restart / rotation).
@@ -52,6 +56,7 @@ public:
     Q_INVOKABLE void cancelChat();
 
 signals:
+    void baseUrlChanged();
     void tokenChanged();
     void healthChanged();
     void busyChanged();
@@ -78,6 +83,7 @@ private:
     QNetworkReply         *_chatReply = nullptr;
 
     QString    _baseUrl;
+    QString    _tokenFileOverride;
     QString    _token;
     QString    _healthState = QStringLiteral("unknown");
     QString    _healthDetail;

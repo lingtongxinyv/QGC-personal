@@ -655,18 +655,55 @@ Rectangle {
                     anchors.margins:    _margin
                     wrapMode:           Text.WordWrap
                     color:              qgcPal.alertText
-                    text: px4Assistant.tokenFound
-                          ? qsTr("本机 DSH 未就绪：%1").arg(root._healthDetailText)
-                          : qsTr("未找到 panel-token。请启动本机 DSH 后再点『重试』。")
+                    text: (px4EmbeddedDsh.enabled && px4EmbeddedDsh.state !== "ready")
+                          ? qsTr("内置助手未就绪（%1）：%2").arg(px4EmbeddedDsh.state).arg(px4EmbeddedDsh.detail)
+                          : px4Assistant.tokenFound
+                            ? qsTr("本机 DSH 未就绪：%1").arg(root._healthDetailText)
+                            : qsTr("未找到 panel-token。请启动本机 DSH 后再点『重试』。")
                 }
             }
 
             QGCButton {
                 text: qsTr("重试")
                 onClicked: {
+                    if (px4EmbeddedDsh.enabled && px4EmbeddedDsh.state !== "ready") {
+                        px4EmbeddedDsh.retry()
+                    }
                     px4Assistant.reloadToken()
                     px4Assistant.probeHealth()
                 }
+            }
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            spacing:      _margin
+            visible:      px4EmbeddedDsh.enabled && !px4EmbeddedDsh.apiKeySet
+
+            QGCLabel {
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                color: qgcPal.warningText
+                text: qsTr("内置助手需要 DeepSeek API 密钥。填入后自动重启，仅保存在本机。")
+            }
+
+            TextField {
+                id: apiKeyField
+                Layout.preferredWidth: parent.width * 0.55
+                placeholderText: qsTr("sk-...")
+                echoMode: TextInput.Password
+                onAccepted: saveApiKey()
+            }
+
+            QGCButton {
+                text: qsTr("保存")
+                onClicked: saveApiKey()
+            }
+
+            function saveApiKey() {
+                if (apiKeyField.text.trim().length === 0) return
+                px4EmbeddedDsh.setApiKey(apiKeyField.text)
+                apiKeyField.text = ""
             }
         }
 

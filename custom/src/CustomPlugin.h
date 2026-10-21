@@ -15,6 +15,7 @@ class AlertNarrator;
 class CustomOptions;
 class CustomPlugin;
 class CustomSettings;
+class EmbeddedDshLauncher;
 class ModelRegistry;
 class QQmlApplicationEngine;
 class TelemetryWsRelay;
@@ -97,6 +98,10 @@ private:
     void _addSettingsEntry(const QString& title, const char* qmlFile, const char* iconFile = nullptr);
 
     CustomOptions *_options = nullptr;
+    // Bundled DSH runtime (dsh/dsh-px4.exe) started as a child process. When an
+    // external DSH is configured through PX4_AGENT_BASE_URL this stays disabled
+    // and the assistant clients keep their environment/default endpoint.
+    EmbeddedDshLauncher *_embeddedDsh = nullptr;
     AssistantClient *_assistant = nullptr;
     TelemetryWsRelay *_wsRelay = nullptr;
     ModelRegistry *_modelRegistry = nullptr;

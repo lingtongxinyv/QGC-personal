@@ -2,6 +2,7 @@
 #include "AlertEngine.h"
 #include "AssistantClient.h"
 #include "AlertNarrator.h"
+#include "EmbeddedDshLauncher.h"
 #include "ModelRegistry.h"
 #include "TelemetryWsRelay.h"
 #include "PerimeterScanComplexItem.h"
@@ -40,6 +41,7 @@ CustomOptions::CustomOptions(CustomPlugin *plugin, QObject *parent)
 CustomPlugin::CustomPlugin(QObject *parent)
     : QGCCorePlugin(parent)
     , _options(new CustomOptions(this, this))
+    , _embeddedDsh(new EmbeddedDshLauncher(this))
     , _assistant(new AssistantClient(this))
     , _wsRelay(new TelemetryWsRelay(this))
     , _modelRegistry(new ModelRegistry(this))
@@ -51,6 +53,27 @@ CustomPlugin::CustomPlugin(QObject *parent)
 
     _showAdvancedUI = false;
     (void) connect(this, &QGCCorePlugin::showAdvancedUIChanged, this, &CustomPlugin::_advancedChanged);
+
+    // Bundled DSH: both assistant clients follow the child process endpoint. The
+    // launcher reports disabled when PX4_AGENT_BASE_URL points at an external DSH
+    // (developer mode), in which case the clients keep their env/default wiring.
+    if (_embeddedDsh->enabled()) {
+        const auto applyEndpoint = [this] {
+            const QString url = _embeddedDsh->baseUrl();
+            if (url.isEmpty()) {
+                return;
+            }
+            _assistant->setEndpoint(url, _embeddedDsh->tokenFile());
+            _alertAssistant->setEndpoint(url, _embeddedDsh->tokenFile());
+        };
+
+        (void) connect(_embeddedDsh, &EmbeddedDshLauncher::endpointChanged, this, applyEndpoint);
+        // A new instance mints a new panel-token; re-read it once health is up.
+        (void) connect(_embeddedDsh, &EmbeddedDshLauncher::ready, _assistant, &AssistantClient::reloadToken);
+        (void) connect(_embeddedDsh, &EmbeddedDshLauncher::ready, _alertAssistant, &AssistantClient::reloadToken);
+
+        _embeddedDsh->start();
+    }
 }
 
 QGCCorePlugin *CustomPlugin::instance()
@@ -266,6 +289,9 @@ QQmlApplicationEngine* CustomPlugin::createQmlApplicationEngine(QObject* parent)
 
     // Expose the DSH px4-panel HTTP/SSE client to QML as `px4Assistant`.
     _qmlEngine->rootContext()->setContextProperty(QStringLiteral("px4Assistant"), _assistant);
+
+    // Bundled DSH lifecycle (disabled|stopped|starting|ready|failed + retry()).
+    _qmlEngine->rootContext()->setContextProperty(QStringLiteral("px4EmbeddedDsh"), _embeddedDsh);
 
     // Expose the Route-B WS broadcaster to QML as `px4WsRelay`.
     _qmlEngine->rootContext()->setContextProperty(QStringLiteral("px4WsRelay"), _wsRelay);
