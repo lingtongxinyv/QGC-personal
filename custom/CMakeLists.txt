@@ -61,6 +61,7 @@ set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/res/Custom/Widgets/Custo
 # and AssistantPanel.qml.
 set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/src/TelemetrySnapshot.js PROPERTIES QT_QML_SKIP_QMLDIR_ENTRY TRUE)
 set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/src/AlertText.js PROPERTIES QT_QML_SKIP_QMLDIR_ENTRY TRUE)
+set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/src/AlertTemplates.js PROPERTIES QT_QML_SKIP_QMLDIR_ENTRY TRUE)
 qgc_set_qt_resource_alias(
     ${CMAKE_CURRENT_SOURCE_DIR}/res/Custom/Widgets/CustomAttitudeWidget.qml
     ${CMAKE_CURRENT_SOURCE_DIR}/res/Custom/Widgets/CustomIconButton.qml
@@ -73,6 +74,7 @@ qgc_set_qt_resource_alias(
     ${CMAKE_CURRENT_SOURCE_DIR}/src/AttitudeView3D.qml
     ${CMAKE_CURRENT_SOURCE_DIR}/src/TelemetrySnapshot.js
     ${CMAKE_CURRENT_SOURCE_DIR}/src/AlertText.js
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/AlertTemplates.js
 )
 
 qt_add_qml_module(CustomModule
@@ -92,6 +94,7 @@ qt_add_qml_module(CustomModule
         ${CMAKE_CURRENT_SOURCE_DIR}/src/AttitudeView3D.qml
         ${CMAKE_CURRENT_SOURCE_DIR}/src/TelemetrySnapshot.js
         ${CMAKE_CURRENT_SOURCE_DIR}/src/AlertText.js
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/AlertTemplates.js
     NO_PLUGIN
 )
 
@@ -125,6 +128,8 @@ set(CUSTOM_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/CustomPlugin.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/AlertEngine.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/src/AlertEngine.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/AlertNarrator.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/AlertNarrator.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/AssistantClient.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/src/AssistantClient.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/TelemetryWsRelay.cc

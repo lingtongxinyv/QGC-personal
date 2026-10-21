@@ -333,6 +333,12 @@ void AlertEngine::_applyDesired(const QString &ruleId, bool active, int level,
         state.peakLevel = qMax(state.peakLevel, level);
         state.code = code;
         state.detail = detail;
+        // Close the row being escalated before starting a new one: without
+        // this the previous history entry keeps active=true forever and the
+        // same rule shows two live rows (local-dsh v11 P3).
+        if (!state.historyEntry.isEmpty()) {
+            _closeHistoryEntry(state.historyEntry, nowMs);
+        }
         state.historyEntry = QVariantMap();
         _announce(state, ruleId, nowMs);
         dirty = true;

@@ -1,6 +1,7 @@
 #include "CustomPlugin.h"
 #include "AlertEngine.h"
 #include "AssistantClient.h"
+#include "AlertNarrator.h"
 #include "ModelRegistry.h"
 #include "TelemetryWsRelay.h"
 #include "PerimeterScanComplexItem.h"
@@ -43,6 +44,8 @@ CustomPlugin::CustomPlugin(QObject *parent)
     , _wsRelay(new TelemetryWsRelay(this))
     , _modelRegistry(new ModelRegistry(this))
     , _alertEngine(new AlertEngine(this))
+    , _alertAssistant(new AssistantClient(this))
+    , _alertNarrator(new AlertNarrator(_alertEngine, _alertAssistant, this))
 {
     qCDebug(CustomLog) << this;
 
@@ -275,6 +278,10 @@ QQmlApplicationEngine* CustomPlugin::createQmlApplicationEngine(QObject* parent)
     // Expose the local deterministic alert rule engine (read-only, R1-R10) as
     // `customAlertEngine`. It never sends anything to the flight controller.
     _qmlEngine->rootContext()->setContextProperty(QStringLiteral("customAlertEngine"), _alertEngine);
+
+    // Phase-2 auto narration: alert -> Xiaoyun explanation (read-only).
+    _qmlEngine->rootContext()->setContextProperty(QStringLiteral("px4AlertAssistant"), _alertAssistant);
+    _qmlEngine->rootContext()->setContextProperty(QStringLiteral("px4AlertNarrator"), _alertNarrator);
 
     _urlInterceptor = new CustomOverrideInterceptor();
     _qmlEngine->addUrlInterceptor(_urlInterceptor);

@@ -11,6 +11,7 @@ class PlanCreator;
 
 class AssistantClient;
 class AlertEngine;
+class AlertNarrator;
 class CustomOptions;
 class CustomPlugin;
 class CustomSettings;
@@ -100,6 +101,10 @@ private:
     TelemetryWsRelay *_wsRelay = nullptr;
     ModelRegistry *_modelRegistry = nullptr;
     AlertEngine *_alertEngine = nullptr;
+    // Phase-2 narrator: its own DSH session so alert interpretation never
+    // interleaves with the user's chat panel stream.
+    AssistantClient *_alertAssistant = nullptr;
+    AlertNarrator *_alertNarrator = nullptr;
     QQmlApplicationEngine *_qmlEngine = nullptr;
     class CustomOverrideInterceptor *_urlInterceptor = nullptr;
     QVariantList _customSettingsList; // Not to be mixed up with QGCCorePlugin implementation

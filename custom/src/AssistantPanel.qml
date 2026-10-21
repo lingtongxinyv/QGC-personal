@@ -6,6 +6,7 @@ import QGroundControl
 import QGroundControl.Controls
 
 import "AlertText.js" as AlertText
+import "AlertTemplates.js" as AlertTemplates
 
 /// Right side dock of the Fly view: read-only Chinese chat with the local DSH
 /// PX4 assistant (persona 小云, preset px4-ta). Backed by the `px4Assistant`
@@ -131,6 +132,51 @@ Rectangle {
     readonly property var    _topAlert: _alertEngineState === "ok" && _activeAlerts.length > 0 ? _activeAlerts[0] : null
     readonly property color  _bannerColor: !_hasVehicle || _alertEngineState !== "ok" ? _alertGrey
                                          : _alertLevelColor[_topAlert.level]
+
+    // ------------------------------------------------------------------
+    // Phase-2 auto narration (read-only). The C++ AlertNarrator sends one
+    // turn per alert burst and returns a structured narrative; when the
+    // local DSH is unreachable the same card renders AlertTemplates.js.
+    // ------------------------------------------------------------------
+    readonly property var    _narration:        px4AlertNarrator.narrative
+    readonly property string _narrationStatus:  px4AlertNarrator.status
+    readonly property bool   _narrationVisible: px4AlertNarrator.enabled
+                                                && _narrationStatus !== "idle"
+                                                && _narrationStatus !== "disabled"
+                                                && _narration.ruleId !== undefined
+    readonly property var    _narrationView: {
+        if (!_narrationVisible || !_narration.ruleId) {
+            return null
+        }
+        if (_narrationStatus === "ready" && _narration.source !== "template") {
+            return {
+                conclusion: _narration.conclusion || "",
+                steps:      _narration.steps || [],
+                risk:       _narration.risk || "",
+                level:      _narration.level,
+                source:     _narration.source
+            }
+        }
+        var tpl = AlertTemplates.template(_narration.ruleId, _narration.code, _narration.detail)
+        return {
+            conclusion: tpl.conclusion,
+            steps:      tpl.steps,
+            risk:       tpl.risk,
+            level:      _narration.level,
+            source:     "template"
+        }
+    }
+    readonly property string _narrationStatusText: {
+        switch (_narrationStatus) {
+        case "requesting": return qsTr("正在解读…")
+        case "ready":      return _narration.source === "auto"
+                                  ? qsTr("来自本机 DSH")
+                                  : qsTr("非结构化回复，已按原文显示")
+        case "offline":    return qsTr("DSH 不在线 · 使用本地建议")
+        case "error":      return qsTr("解读失败 · 使用本地建议")
+        default:           return ""
+        }
+    }
 
     ListModel { id: _messages }
 
@@ -310,6 +356,113 @@ Rectangle {
                         anchors.fill: parent
                         onClicked: root.alertSettingsOpen = !root.alertSettingsOpen
                     }
+                }
+            }
+        }
+
+        // ------------------------------------------------------------------
+        // Phase-2 narration card: conclusion + steps + risk, all read-only.
+        // Rendered from the DSH reply when available, otherwise from the
+        // matching local template so guidance never disappears offline.
+        // ------------------------------------------------------------------
+        Rectangle {
+            Layout.fillWidth: true
+            visible: root._narrationVisible
+            implicitHeight: narrationColumn.implicitHeight + root._margin * 1.6
+            radius: ScreenTools.defaultBorderRadius
+            color: qgcPal.windowShadeDark
+            border.width: 1
+            border.color: {
+                if (!root._narrationView) return qgcPal.text
+                if (root._narrationView.level >= 2) return root._alertRed
+                if (root._narrationView.level === 1) return root._alertYellow
+                return qgcPal.text
+            }
+
+            ColumnLayout {
+                id: narrationColumn
+                anchors.fill: parent
+                anchors.margins: root._margin * 0.8
+                spacing: root._margin * 0.5
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: root._margin
+
+                    QGCLabel {
+                        text: qsTr("小云解读")
+                        font.bold: true
+                        font.pointSize: ScreenTools.smallFontPointSize
+                        color: qgcPal.text
+                    }
+
+                    QGCLabel {
+                        Layout.fillWidth: true
+                        text: root._narrationStatusText
+                        font.pointSize: ScreenTools.smallFontPointSize
+                        color: qgcPal.colorGrey
+                        elide: Text.ElideRight
+                    }
+
+                    QGCLabel {
+                        text: qsTr("重解")
+                        font.pointSize: ScreenTools.smallFontPointSize
+                        color: qgcPal.text
+                        visible: root._narrationStatus === "ready"
+                                 || root._narrationStatus === "offline"
+                                 || root._narrationStatus === "error"
+
+                        QGCMouseArea {
+                            anchors.fill: parent
+                            onClicked: px4AlertNarrator.refresh()
+                        }
+                    }
+
+                    QGCLabel {
+                        text: qsTr("收起")
+                        font.pointSize: ScreenTools.smallFontPointSize
+                        color: qgcPal.text
+
+                        QGCMouseArea {
+                            anchors.fill: parent
+                            onClicked: px4AlertNarrator.dismiss()
+                        }
+                    }
+                }
+
+                QGCLabel {
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                    text: root._narrationView ? root._narrationView.conclusion : ""
+                    font.bold: true
+                    color: qgcPal.text
+                }
+
+                Column {
+                    Layout.fillWidth: true
+                    spacing: root._margin * 0.3
+                    visible: root._narrationView && root._narrationView.steps.length > 0
+
+                    Repeater {
+                        model: root._narrationView ? root._narrationView.steps : []
+
+                        QGCLabel {
+                            width: narrationColumn.width
+                            wrapMode: Text.WordWrap
+                            font.pointSize: ScreenTools.smallFontPointSize
+                            color: qgcPal.text
+                            text: (index + 1) + ". " + modelData
+                        }
+                    }
+                }
+
+                QGCLabel {
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                    visible: root._narrationView && root._narrationView.risk !== ""
+                    text: root._narrationView ? qsTr("风险：%1").arg(root._narrationView.risk) : ""
+                    font.pointSize: ScreenTools.smallFontPointSize
+                    color: root._alertYellow
                 }
             }
         }
