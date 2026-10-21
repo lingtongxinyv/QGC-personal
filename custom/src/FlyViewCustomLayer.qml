@@ -7,6 +7,8 @@ import QGroundControl.Controls
 import Custom.Widgets
 
 Item {
+    id: customLayer
+
     property var parentToolInsets                       // These insets tell you what screen real estate is available for positioning the controls in your overlay
     property var totalToolInsets:   _totalToolInsets    // The insets updated for the custom overlay additions
     property var mapControl
@@ -256,6 +258,7 @@ Item {
         anchors.rightMargin:    _toolsMargin
         parentToolInsets:       parentToolInsets
         mapControl:             mapControl
+        guidanceLayer:          customLayer
     }
 
     //-------------------------------------------------------------------------
@@ -271,6 +274,273 @@ Item {
             context:            Qt.ApplicationShortcut
             onActivated:        attitudeView3D.open = !attitudeView3D.open
         }
+    }
+
+    //-------------------------------------------------------------------------
+    //-- 智能指示 · 跳转 + 全域高亮（B5 三期，只读）
+    //
+    // targetId 白名单 → (页面导航 + 控件定位 + 呼吸描边 ~4.5s 自动消退)。
+    // 硬边界：零 MAVLink 写 / 零参数写 / 零模式切换；导航只调 mainWindow 既有
+    // 视图切换接口，高亮层是纯视觉 overlay，不改目标控件行为、不注入数据。
+    // 未知 targetId 一律静默不跳（验收 D1）。
+
+    /// Whitelist registry. page: fly | plan | analyze | setup | settings |
+    /// "settings:<nameKey>". resolve: objectName under mainWindow.contentItem,
+    /// or a local id ("attitudeIndicator" / "attitudeView3D").
+    readonly property var _guidanceTargets: ({
+        "fly.toolbar.battery":      { page: "fly",       objectName: "toolbar_batteryIndicator",        label: qsTr("电池状态") },
+        "fly.toolbar.gps":          { page: "fly",       objectName: "toolbar_gpsIndicator",            label: qsTr("GPS 状态") },
+        "fly.toolbar.radio":        { page: "fly",       objectName: "toolbar_telemetryRSSIIndicator",  label: qsTr("数传信号") },
+        "fly.toolbar.mode":         { page: "fly",       objectName: "toolbar_flightModeIndicator",     label: qsTr("飞行模式") },
+        "fly.toolbar.status":       { page: "fly",       objectName: "toolbar_mainStatusIndicator",     label: qsTr("载具状态") },
+        "fly.attitude":             { page: "fly",       localItem:  "attitudeIndicator",               label: qsTr("姿态仪") },
+        "fly.view3d":               { page: "fly",       localItem:  "attitudeView3D", open3d: true,    label: qsTr("3D 姿态视图") },
+        "panel.chat":               { page: "fly",       objectName: "guidance_panelChat",         panelOpen: true,  label: qsTr("助手对话") },
+        "panel.alertSettings":      { page: "fly",       objectName: "guidance_panelAlertSettings", panelSettings: true, label: qsTr("告警设置") },
+        "panel.alertHistory":       { page: "fly",       objectName: "guidance_panelAlertHistory",  panelHistory: true,  label: qsTr("告警历史") },
+        "view.plan":                { page: "plan",      objectName: "mainView_plan",                   label: qsTr("计划视图") },
+        "view.analyze":             { page: "analyze",   objectName: "mainView_toolDrawer",             label: qsTr("分析工具") },
+        "view.setup":               { page: "setup",     objectName: "mainView_toolDrawer",             label: qsTr("载具设置") },
+        "view.settings":            { page: "settings",  objectName: "mainView_toolDrawer",             label: qsTr("应用设置") },
+        "view.settings.commLinks":  { page: "settings:Comm Links", objectName: "settingsButton_Comm Links", label: qsTr("链路设置") }
+    })
+
+    property var _guidancePending: null
+    property int _guidanceAttempts: 0
+
+    function guidanceKnown(targetId) {
+        return typeof targetId === "string" && _guidanceTargets[targetId] !== undefined
+    }
+
+    /// Jump to the page owning targetId and flash the control. Returns false for
+    /// unknown ids or when navigation is currently blocked (validation errors,
+    /// calibration lock) - in both cases nothing happens at all.
+    function guidanceJump(targetId) {
+        var t = _guidanceTargets[targetId]
+        if (!t) {
+            return false
+        }
+        if (!mainWindow.allowViewSwitch()) {
+            return false
+        }
+        if (t.page === "fly") {
+            mainWindow.showFlyView()
+        } else if (t.page === "plan") {
+            mainWindow.showPlanView()
+        } else if (t.page === "analyze") {
+            mainWindow.showAnalyzeTool()
+        } else if (t.page === "setup") {
+            mainWindow.showVehicleConfig()
+        } else if (t.page === "settings") {
+            mainWindow.showSettingsTool()
+        } else if (t.page.indexOf("settings:") === 0) {
+            mainWindow.showSettingsTool(t.page.substring(9))
+        }
+        if (t.panelOpen || t.panelSettings || t.panelHistory) {
+            assistantPanel.open = true
+        }
+        if (t.panelSettings) {
+            assistantPanel.alertSettingsOpen = true
+        }
+        if (t.panelHistory) {
+            assistantPanel.alertHistoryOpen = true
+        }
+        if (t.open3d) {
+            attitudeView3D.open = true
+        }
+        _guidancePending = t
+        _guidanceAttempts = 0
+        guidanceLocateTimer.restart()
+        return true
+    }
+
+    function _findByObjectName(item, name) {
+        if (!item) {
+            return null
+        }
+        if (item.objectName === name) {
+            return item
+        }
+        var kids = item.children
+        for (var i = 0; i < kids.length; ++i) {
+            var hit = _findByObjectName(kids[i], name)
+            if (hit) {
+                return hit
+            }
+        }
+        return null
+    }
+
+    function _resolveGuidanceItem(t) {
+        if (t.localItem === "attitudeIndicator") {
+            return attitudeIndicator
+        }
+        if (t.localItem === "attitudeView3D") {
+            return attitudeView3D
+        }
+        return _findByObjectName(mainWindow.contentItem, t.objectName)
+    }
+
+    // Async pages (tool drawer / settings) load after the navigation call, so
+    // resolution retries briefly instead of flashing nothing.
+    Timer {
+        id: guidanceLocateTimer
+        interval: 120
+        repeat: true
+        onTriggered: {
+            var t = customLayer._guidancePending
+            if (!t) {
+                stop()
+                return
+            }
+            var item = customLayer._resolveGuidanceItem(t)
+            if (item) {
+                var ok = false
+                try { ok = item.visible && item.width > 0 && item.height > 0 } catch (e) { ok = false }
+                if (ok) {
+                    customLayer._guidancePending = null
+                    stop()
+                    guidanceOverlay.flash(item, t.label)
+                    return
+                }
+            }
+            customLayer._guidanceAttempts += 1
+            if (customLayer._guidanceAttempts > 15) {
+                customLayer._guidancePending = null
+                stop()
+            }
+        }
+    }
+
+    // Highlight overlay: lives on top of mainWindow.contentItem so every page
+    // (fly / plan / tool drawer) can be outlined. Purely visual - no MouseArea,
+    // never intercepts input, never touches the target control.
+    Item {
+        id: guidanceOverlay
+        anchors.fill: parent
+        visible: false
+        z: 10000
+
+        property var _targetItem: null
+
+        function flash(item, label) {
+            _targetItem = item
+            _reposition()
+            guidanceLabel.text = label || ""
+            guidanceLabelBg.visible = label !== undefined && label !== ""
+            fadeOut.stop()
+            opacity = 1.0
+            highlightFrame.opacity = 1.0
+            visible = true
+            breathe.restart()
+            hideTimer.restart()
+            guardTimer.restart()
+        }
+
+        function dismiss() {
+            breathe.stop()
+            fadeOut.stop()
+            hideTimer.stop()
+            guardTimer.stop()
+            _targetItem = null
+            opacity = 1.0
+            highlightFrame.opacity = 1.0
+            visible = false
+        }
+
+        function _reposition() {
+            if (!_targetItem) {
+                return
+            }
+            var pad = ScreenTools.defaultFontPixelWidth * 0.4
+            var p = _targetItem.mapToItem(guidanceOverlay, 0, 0)
+            highlightFrame.x = Math.max(0, p.x - pad)
+            highlightFrame.y = Math.max(0, p.y - pad)
+            highlightFrame.width = Math.min(guidanceOverlay.width - highlightFrame.x, _targetItem.width + pad * 2)
+            highlightFrame.height = Math.min(guidanceOverlay.height - highlightFrame.y, _targetItem.height + pad * 2)
+        }
+
+        Rectangle {
+            id: highlightFrame
+            color: "transparent"
+            border.color: qgcPal.colorOrange
+            border.width: 3
+            radius: ScreenTools.defaultBorderRadius * 2
+        }
+
+        Rectangle {
+            id: guidanceLabelBg
+            anchors.top: highlightFrame.bottom
+            anchors.topMargin: 2
+            anchors.left: highlightFrame.left
+            width: guidanceLabel.implicitWidth + ScreenTools.defaultFontPixelWidth
+            height: guidanceLabel.implicitHeight + ScreenTools.defaultFontPixelHeight * 0.4
+            radius: ScreenTools.defaultBorderRadius
+            color: qgcPal.windowShadeDark
+            border.color: qgcPal.colorOrange
+            border.width: 1
+
+            QGCLabel {
+                id: guidanceLabel
+                anchors.centerIn: parent
+                font.pointSize: ScreenTools.smallFontPointSize
+                color: qgcPal.text
+            }
+        }
+
+        SequentialAnimation {
+            id: breathe
+            loops: Animation.Infinite
+            NumberAnimation { target: highlightFrame; property: "opacity"; from: 1.0; to: 0.3; duration: 650; easing.type: Easing.InOutSine }
+            NumberAnimation { target: highlightFrame; property: "opacity"; from: 0.3; to: 1.0; duration: 650; easing.type: Easing.InOutSine }
+        }
+
+        NumberAnimation {
+            id: fadeOut
+            target: guidanceOverlay
+            property: "opacity"
+            from: 1.0
+            to: 0.0
+            duration: 400
+            onStopped: guidanceOverlay.dismiss()
+        }
+
+        Timer {
+            id: hideTimer
+            interval: 4500
+            onTriggered: {
+                breathe.stop()
+                fadeOut.restart()
+            }
+        }
+
+        // Follow layout shifts; drop the highlight if the target went away
+        // (page switch, unloaded drawer) instead of drawing a stale frame.
+        Timer {
+            id: guardTimer
+            interval: 400
+            repeat: true
+            onTriggered: {
+                var item = guidanceOverlay._targetItem
+                if (!item) {
+                    guidanceOverlay.dismiss()
+                    return
+                }
+                var alive = false
+                try { alive = item.visible } catch (e) { alive = false }
+                if (!alive) {
+                    guidanceOverlay.dismiss()
+                    return
+                }
+                guidanceOverlay._reposition()
+            }
+        }
+    }
+
+    Component.onCompleted: {
+        // Reparent the highlight overlay to the top-level content item so it can
+        // outline controls on any page, not just the fly view layer.
+        guidanceOverlay.parent = mainWindow.contentItem
     }
 
 }

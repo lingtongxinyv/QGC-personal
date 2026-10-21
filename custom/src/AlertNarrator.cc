@@ -319,6 +319,7 @@ QString AlertNarrator::_buildPrompt(const QVariantList &alerts) const
     prompt += QStringLiteral("Hard rules: never propose writing to the vehicle - no arm/disarm, no mode change, no parameter writes, no mission uploads, no calibration or motor-test commands. Your guidance is informational and read-only.\n");
     prompt += QStringLiteral("Answer in Simplified Chinese.\n");
     prompt += QStringLiteral("Return ONLY one JSON object, no markdown fences, with these keys: conclusion (one short sentence), steps (array of at most 5 short imperative strings), risk (one short sentence, may be empty), targetId (short ui target id, or empty string if none).\n");
+    prompt += QStringLiteral("Allowed targetId values (pick the closest match, or empty string): fly.toolbar.battery, fly.toolbar.gps, fly.toolbar.radio, fly.toolbar.mode, fly.toolbar.status, fly.attitude, panel.alertSettings, panel.alertHistory, panel.chat, view.plan, view.analyze, view.setup, view.settings, view.settings.commLinks.\n");
     prompt += QStringLiteral("Level 1 = warning, level 2 = critical, level 3 = most severe.\n");
     prompt += QStringLiteral("Facts: ");
     prompt += payload;

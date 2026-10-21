@@ -19,6 +19,10 @@ Rectangle {
     property var parentToolInsets
     property var mapControl
 
+    /// FlyViewCustomLayer (guidance registry + highlight overlay, B5 phase 3).
+    /// Optional: when null the locate button is hidden.
+    property var guidanceLayer: null
+
     /// Open (full chat) vs collapsed (vertical tab on the right edge).
     property bool open: true
 
@@ -154,7 +158,8 @@ Rectangle {
                 steps:      _narration.steps || [],
                 risk:       _narration.risk || "",
                 level:      _narration.level,
-                source:     _narration.source
+                source:     _narration.source,
+                targetId:   _narration.targetId || ""
             }
         }
         var tpl = AlertTemplates.template(_narration.ruleId, _narration.code, _narration.detail)
@@ -163,9 +168,15 @@ Rectangle {
             steps:      tpl.steps,
             risk:       tpl.risk,
             level:      _narration.level,
-            source:     "template"
+            source:     "template",
+            targetId:   tpl.targetId || ""
         }
     }
+    /// Locate button is only offered for whitelisted targets (D1).
+    readonly property bool _narrationCanLocate: _narrationView !== null
+                                                && _narrationView.targetId !== ""
+                                                && root.guidanceLayer !== null
+                                                && root.guidanceLayer.guidanceKnown(_narrationView.targetId)
     readonly property string _narrationStatusText: {
         switch (_narrationStatus) {
         case "requesting": return qsTr("正在解读…")
@@ -405,6 +416,18 @@ Rectangle {
                     }
 
                     QGCLabel {
+                        text: qsTr("定位")
+                        font.pointSize: ScreenTools.smallFontPointSize
+                        color: qgcPal.text
+                        visible: root._narrationCanLocate
+
+                        QGCMouseArea {
+                            anchors.fill: parent
+                            onClicked: root.guidanceLayer.guidanceJump(root._narrationView.targetId)
+                        }
+                    }
+
+                    QGCLabel {
                         text: qsTr("重解")
                         font.pointSize: ScreenTools.smallFontPointSize
                         color: qgcPal.text
@@ -470,6 +493,7 @@ Rectangle {
         // Alert history: newest first, capped by the engine (200 entries).
         Rectangle {
             Layout.fillWidth: true
+            objectName: "guidance_panelAlertHistory"
             implicitHeight: root.alertHistoryOpen ? ScreenTools.defaultFontPixelHeight * 10 : 0
             visible: root.alertHistoryOpen
             clip: true
@@ -558,6 +582,7 @@ Rectangle {
         // Alert settings: master switch, per-rule switches, thresholds.
         Rectangle {
             Layout.fillWidth: true
+            objectName: "guidance_panelAlertSettings"
             implicitHeight: root.alertSettingsOpen ? alertSettingsColumn.implicitHeight + root._margin : 0
             visible: root.alertSettingsOpen
             clip: true
@@ -763,6 +788,7 @@ Rectangle {
 
         RowLayout {
             Layout.fillWidth: true
+            objectName: "guidance_panelChat"
             spacing:          _margin
 
             QGCTextField {
