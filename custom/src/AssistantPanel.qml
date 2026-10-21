@@ -134,8 +134,8 @@ Rectangle {
     readonly property string _alertEngineState: customAlertEngine.state
     readonly property bool   _hasVehicle: QGroundControl.multiVehicleManager.activeVehicle !== null
     readonly property var    _topAlert: _alertEngineState === "ok" && _activeAlerts.length > 0 ? _activeAlerts[0] : null
-    readonly property color  _bannerColor: !_hasVehicle || _alertEngineState !== "ok" ? _alertGrey
-                                         : _alertLevelColor[_topAlert.level]
+    readonly property color  _bannerColor: (!_hasVehicle || _alertEngineState !== "ok" || !_topAlert) ? _alertGrey
+                                         : (_alertLevelColor[_topAlert.level] || _alertGrey)
 
     // ------------------------------------------------------------------
     // Phase-2 auto narration (read-only). The C++ AlertNarrator sends one

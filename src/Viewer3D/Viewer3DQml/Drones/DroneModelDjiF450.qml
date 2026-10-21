@@ -32,13 +32,32 @@ Node {
     property double pitch: vehicle ? finiteOr(vehicle.pitch.value, 0) : 0
     property double pose_x: finiteOr(geo2Enu.localCoordinate.x, 0) * 10
     property double pose_y: finiteOr(geo2Enu.localCoordinate.y, 0) * 10
-    // Scene coordinates are meters - use rawValue since cooked value follows the user's units setting
-    property double pose_z: (finiteOr((vehicle ? vehicle.altitudeRelative.rawValue : 0), 0) + altitudeBias) * 10
+    // Scene coordinates are meters - use rawValue since cooked value follows the user's units setting.
+    // Altitude 0 is ground level: groundClearance lifts the airframe so its lowest
+    // point rests on the ground plane, and negative relative altitude is clamped
+    // to it so the model can never sink through the ground (the numeric readout
+    // still shows the true value).
+    property double pose_z: Math.max(0, finiteOr((vehicle ? vehicle.altitudeRelative.rawValue : 0), 0) + altitudeBias) * 10 + groundClearance
     property double roll: vehicle ? finiteOr(vehicle.roll.value, 0) : 0
-    // Longest edge an imported asset is normalized to, in scene units, so it
-    // reads at the same visual size as the built-in airframe.
     property real externalTargetExtent: 1000
     property var vehicle
+
+    // Optional scaling for the 3D vehicle-id label. A view that renders the
+    // airframe at a small physical scale (the floating attitude window frames a
+    // 0.35 m airframe) sets this below 1, otherwise the label ends up several
+    // times taller than the model itself.
+    property real labelScale: 1
+
+    // Vertical distance from the model origin down to its lowest point, in scene
+    // units. Altitude 0 means "on the home/ground level", so without this the
+    // airframe is drawn half-way through the ground plane - the model origin is
+    // its geometric centre, not its landing gear. Built-in mesh: 720 units tall
+    // in model space (rotation x=90 maps model +Y onto scene +Z), so half of it
+    // is 360 * modelScale. Imported assets are centred on their bounds and keep
+    // the same x=90 correction, so half of their scaled Y extent is used.
+    readonly property real groundClearance: externalModel
+        ? externalLoader._sizeY * externalLoader._scale * 0.5
+        : 360 * modelScale.y
 
     rotation: Quaternion.fromEulerAngles(Qt.vector3d(0, 0, (90 - body.heading)))
 
@@ -64,6 +83,7 @@ Node {
         eulerRotation.x: 90
         position.x: -10
         position.z: 30
+        scale: Qt.vector3d(body.labelScale, body.labelScale, body.labelScale)
 
         // Plain Text instead of QGCLabel: QGCLabel sets font.pointSize, which
         // conflicts with the explicit pixelSize needed for 3D scene scaling.

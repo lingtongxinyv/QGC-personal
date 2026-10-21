@@ -52,16 +52,34 @@ Rectangle {
     property var _snap:   null
     property var _sceneItem: null
 
+    // Placement. Until the title bar is dragged the panel follows the fly view
+    // declaratively. Once the user drags it, their own position wins - but it is
+    // still computed through a clamp against the current parent size, so
+    // maximizing or shrinking the window can never leave the title bar stranded
+    // at (or past) the bottom edge with the body clipped off-screen.
+    property bool _userPlaced: false
+    property real _userX:     0
+    property real _userY:     0
+
+    function _clamp(v, lo, hi) {
+        return Math.max(lo, Math.min(v, hi))
+    }
+
+    function _defaultX() {
+        return (parentToolInsets ? parentToolInsets.leftEdgeTopInset : 0) + _margin * 2
+    }
+
+    function _defaultY() {
+        return parent.height - height - (parentToolInsets ? parentToolInsets.bottomEdgeLeftInset : 0) - _margin * 2
+    }
+
     width:  _openWidth
     height: (open && !detached) ? _openHeight : _titleHeight
 
-    // Default placement: bottom-left corner of the fly view, clear of the tool
-    // insets. Declarative rather than a one-shot assignment so the panel
-    // re-positions itself once ScreenTools font metrics and parentToolInsets
-    // resolve. Dragging the title bar assigns x/y directly, which replaces
-    // these bindings - i.e. the user takes over the placement.
-    x: (parentToolInsets ? parentToolInsets.leftEdgeTopInset : 0) + _margin * 2
-    y: parent.height - height - (parentToolInsets ? parentToolInsets.bottomEdgeLeftInset : 0) - _margin * 2
+    x: _userPlaced ? _clamp(_userX, _margin * 2, Math.max(_margin * 2, (parent ? parent.width : 0) - width - _margin * 2))
+                   : _defaultX()
+    y: _userPlaced ? _clamp(_userY, _margin * 2, Math.max(_margin * 2, (parent ? parent.height : 0) - height - _margin * 2))
+                   : _defaultY()
 
     color:  qgcPal.windowShade
     radius: ScreenTools.defaultFontPixelWidth * 0.4
@@ -190,13 +208,30 @@ Rectangle {
         radius: root.radius
 
         MouseArea {
+            id: titleDrag
             anchors.fill: parent
-            drag.target: root
-            drag.axis: Drag.XAndYAxis
-            drag.minimumX: 0
-            drag.maximumX: root.parent ? root.parent.width - root.width : 0
-            drag.minimumY: 0
-            drag.maximumY: root.parent ? root.parent.height - root.height : 0
+
+            property real _grabX:  0
+            property real _grabY:  0
+            property real _startX: 0
+            property real _startY: 0
+
+            onPressed: (mouse) => {
+                _grabX  = mouse.x
+                _grabY  = mouse.y
+                _startX = root._userPlaced ? root._userX : root.x
+                _startY = root._userPlaced ? root._userY : root.y
+            }
+            onPositionChanged: (mouse) => {
+                if (!pressed) {
+                    return
+                }
+                // Keep the bindings alive: write the raw position, let root.x/y
+                // clamp it to the current fly view on every layout change.
+                root._userPlaced = true
+                root._userX = _startX + mouse.x - _grabX
+                root._userY = _startY + mouse.y - _grabY
+            }
         }
 
         QGCLabel {
@@ -372,6 +407,18 @@ Rectangle {
             id: sceneArea
             anchors.fill: parent
 
+            // Airframe scale, matching the main Viewer3D vehicle (0.05). The raw
+            // mesh spans 1280 model units, so without this the model was drawn
+            // ~100 m across and sank through the ground plane at low altitude -
+            // the original bug. True-size rendering (0.35 m across) was tried
+            // and is sub-pixel from any usable camera distance; altitude is
+            // conveyed by the Z axis, plumb line and HUD instead.
+            readonly property real airframeScale: 0.05
+
+            // World Z axis height, rounded up to the next 5 m so the pole always
+            // reaches past the current altitude (5 m minimum when on the ground).
+            readonly property real axisTopM: Math.max(5, Math.ceil((root._snap ? Math.max(0, root._snap.position.altitude_rel_m) : 0) / 5) * 5)
+
             Viewer3DCameraController {
                 id: _cam
                 viewportSize: Qt.size(view3d.width, view3d.height)
@@ -404,6 +451,9 @@ Rectangle {
                     Model {
                         source: "#Rectangle"
                         scale: Qt.vector3d(600, 600, 1)
+                        // Just below z=0 so the floor can never z-fight with the
+                        // grid lines or the ground marker drawn at ground level.
+                        position.z: -0.05
                         materials: PrincipledMaterial {
                             baseColor: "#232833"
                             roughness: 1.0
@@ -419,8 +469,89 @@ Rectangle {
                         gridColor: "#8a93a6"
                     }
 
-                    // Airframe - pick model by registry id
-                    // Direct binding (DroneModelDjiF450 already has modelScale)
+                    //---------------------------------------------------------
+                    // World Z axis at the ENU origin (home / take-off point).
+                    // The grid only spans X/Y, so height had no visual reference.
+                    // One tick per metre, a longer tick every 5 m; the numbers are
+                    // projected to 2D by axisLabels below (Qt Quick 3D has no
+                    // billboard text here).
+                    //---------------------------------------------------------
+                    Node {
+                        id: altitudeAxis
+
+                        // Pole. The built-in #Cylinder is Y-up (height 100, radius
+                        // 50), so x=90 stands its axis up in this z-up scene.
+                        Model {
+                            source: "#Cylinder"
+                            eulerRotation.x: 90
+                            position: Qt.vector3d(0, 0, sceneArea.axisTopM * 5)
+                            scale: Qt.vector3d(0.004, sceneArea.axisTopM / 10, 0.004)
+                            materials: DefaultMaterial {
+                                lighting: DefaultMaterial.NoLighting
+                                diffuseColor: "#6fb4ff"
+                            }
+                        }
+
+                        Repeater3D {
+                            model: Math.round(sceneArea.axisTopM)
+
+                            delegate: Model {
+                                readonly property int  _metre: index + 1
+                                readonly property bool _major: (_metre % 5) === 0
+
+                                source: "#Cylinder"
+                                eulerRotation.z: 90
+                                position: Qt.vector3d(0, 0, _metre * 10)
+                                scale: Qt.vector3d(0.003, (_major ? 2.0 : 0.8) / 100, 0.003)
+                                materials: DefaultMaterial {
+                                    lighting: DefaultMaterial.NoLighting
+                                    diffuseColor: _major ? "#9fd0ff" : "#4f6f93"
+                                }
+                            }
+                        }
+                    }
+
+                    //---------------------------------------------------------
+                    // Plumb line from the airframe down to its own ground point,
+                    // plus a ground disc. The camera follows the drone, so this
+                    // keeps the altitude readable even when the world Z axis is
+                    // out of frame.
+                    //---------------------------------------------------------
+                    Node {
+                        id: altitudeDrop
+
+                        readonly property real _x: djiF450.position.x
+                        readonly property real _y: djiF450.position.y
+                        readonly property real _z: djiF450.position.z
+
+                        visible: _z > 0.1
+
+                        Model {
+                            source: "#Cylinder"
+                            eulerRotation.x: 90
+                            position: Qt.vector3d(altitudeDrop._x, altitudeDrop._y, altitudeDrop._z / 2)
+                            scale: Qt.vector3d(0.002, altitudeDrop._z / 100, 0.002)
+                            materials: DefaultMaterial {
+                                lighting: DefaultMaterial.NoLighting
+                                diffuseColor: "#7fe07f"
+                            }
+                        }
+
+                        Model {
+                            // Thin disc marking the ground point under the drone.
+                            source: "#Cylinder"
+                            position: Qt.vector3d(altitudeDrop._x, altitudeDrop._y, 0.02)
+                            scale: Qt.vector3d(0.04, 0.0004, 0.04)
+                            materials: DefaultMaterial {
+                                lighting: DefaultMaterial.NoLighting
+                                diffuseColor: "#3f7a4f"
+                            }
+                        }
+                    }
+
+                    // Airframe - pick model by registry id. Rendered at the real
+                    // aircraft size (0.35 m across, ~0.2 m tall) so the altitude
+                    // axis and the ground plane share one metric scale.
                     Node {
                         id: airframe
 
@@ -429,6 +560,10 @@ Rectangle {
                             vehicle: root.vehicle
                             gpsRef: root._gpsRef ? root._gpsRef
                                                       : QtPositioning.coordinate(0, 0, 0)
+                            modelScale: Qt.vector3d(sceneArea.airframeScale, sceneArea.airframeScale, sceneArea.airframeScale)
+                            // Keep the 3D id label proportional to the airframe instead
+                            // of leaving it 25 units (2.5 m) tall next to a 0.2 m drone.
+                            labelScale: sceneArea.airframeScale / 0.05
                             visible: root.modelId === "dji_f450"
                         }
                     }
@@ -682,6 +817,102 @@ Rectangle {
             }
 
             //-----------------------------------------------------------------
+            // Z-axis metre labels: project the major ticks of the world Z axis
+            // to screen. Qt Quick 3D 6.11 has no billboard text, and this is the
+            // same View3D.mapFrom3DScene() route used for the on-model labels.
+            Item {
+                id: axisLabels
+                anchors.fill: view3d
+                visible: root.open
+
+                // Projection is derived from the camera controller state rather
+                // than View3D.mapFrom3DScene(). The latter queries the live scene
+                // camera, which CameraLightModel is still repositioning when this
+                // binding first runs, so it can latch a stale point that is never
+                // refreshed. The controller state is the same input the camera
+                // rig consumes, so the result is always in sync.
+                readonly property string _cameraKey: _cam.heading + "," + _cam.tilt + "," + _cam.distance + ","
+                                                   + _cam.orbitCenter.x + "," + _cam.orbitCenter.y + ","
+                                                   + _cam.orbitCenter.z + "," + width + "," + height
+
+                readonly property var _marks: {
+                    // Keep the binding live: the camera key is the only observable
+                    // input that affects the result.
+                    var unused = _cameraKey
+                    var out = []
+                    var lastPy = 1e9
+                    // One label per metre, then drop any that would land closer
+                    // than ~16 px to the previous one so distant views stay legible.
+                    for (var m = 1; m <= Math.round(sceneArea.axisTopM); m++) {
+                        var p = axisLabels._project(0, 0, m * 10)
+                        if (!p || p.x < 0 || p.y < 0 || p.x > width || p.y > height) {
+                            continue
+                        }
+                        if (lastPy - p.y < 16) {
+                            continue
+                        }
+                        lastPy = p.y
+                        out.push({ metre: m, px: p.x, py: p.y, major: (m % 5) === 0 })
+                    }
+                    return out
+                }
+
+                /// Scene position (ENU, z-up) -> item pixel position, or null
+                /// when the point is behind the camera. Mirrors the orbit rig in
+                /// CameraLightModel: yaw about z, then pitch, camera at distance
+                /// along the orbit direction looking back at the orbit center.
+                function _project(sceneX, sceneY, sceneZ) {
+                    if (width <= 0 || height <= 0 || _cam.distance <= 0) {
+                        return null
+                    }
+                    var d2r = Math.PI / 180
+                    var sinH = Math.sin(_cam.heading * d2r)
+                    var cosH = Math.cos(_cam.heading * d2r)
+                    var sinT = Math.sin(_cam.tilt * d2r)
+                    var cosT = Math.cos(_cam.tilt * d2r)
+                    var c = _cam.orbitCenter
+                    var cx = c.x + sinT * sinH * _cam.distance
+                    var cy = c.y - sinT * cosH * _cam.distance
+                    var cz = c.z + cosT * _cam.distance
+                    var vx = sceneX - cx
+                    var vy = sceneY - cy
+                    var vz = sceneZ - cz
+                    // Depth along the view direction (-orbit direction).
+                    var depth = -(vx * sinT * sinH - vy * sinT * cosH + vz * cosT)
+                    if (depth <= 0.01) {
+                        return null
+                    }
+                    var right = vx * cosH + vy * sinH
+                    var up = -vx * cosT * sinH + vy * cosT * cosH + vz * sinT
+                    var tanHalf = Math.tan(standAloneScene.cameraOne.fieldOfView * d2r / 2)
+                    var aspect = width / Math.max(1, height)
+                    var ndcX = right / (depth * tanHalf * aspect)
+                    var ndcY = up / (depth * tanHalf)
+                    if (!isFinite(ndcX) || !isFinite(ndcY)) {
+                        return null
+                    }
+                    return Qt.point(width * 0.5 * (1 + ndcX), height * 0.5 * (1 - ndcY))
+                }
+
+                Repeater {
+                    model: axisLabels._marks
+
+                    delegate: QGCLabel {
+                        required property var modelData
+
+                        x: modelData.px + 6
+                        // Keep the label inside the view even when the tick sits
+                        // right at the top or bottom edge of the frame.
+                        y: Math.max(0, Math.min(axisLabels.height - height, modelData.py - height / 2))
+                        text: modelData.metre + " m"
+                        color: modelData.major ? "#9fd0ff" : "#6f8dab"
+                        font.pointSize: modelData.major ? ScreenTools.smallFontPointSize
+                                                        : ScreenTools.smallFontPointSize * 0.85
+                    }
+                }
+            }
+
+            //-----------------------------------------------------------------
             // On-model labels: project drone 3D position to screen via
             // View3D.mapFrom3DScene(). Qt 6.11 native, no Text3D dependency.
             Item {
@@ -792,7 +1023,16 @@ Rectangle {
                 font.pointSize: ScreenTools.smallFontPointSize
             }
 
-            Component.onCompleted: _cam.lookAt(Qt.vector3d(0, 0, 0), 35, 55, 240)
+            Component.onCompleted: {
+                // Small near plane so the airframe is never clipped when the
+                // user zooms all the way in.
+                standAloneScene.cameraOne.clipNear = 0.2
+                // Frame the airframe itself, not the ENU origin: the panel can be
+                // opened while the vehicle is already airborne. 15 m keeps the
+                // 64-unit airframe comfortably framed (at 2 m the camera sat
+                // inside its bounding sphere and nothing was visible).
+                _cam.lookAt(djiF450.position, 35, 55, 150)
+            }
         }
     }
 }

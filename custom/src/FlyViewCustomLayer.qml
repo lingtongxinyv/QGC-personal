@@ -41,19 +41,27 @@ Item {
         return hours+':'+minutes+':'+seconds;
     }
 
+    // parentToolInsets is assigned by FlyView after the layer is created, so at
+    // startup it is undefined. `undefined + number` yields NaN, which makes any
+    // anchored item silently disappear (T7). Always read through this helper so
+    // the binding stays live and recovers as soon as the insets arrive.
+    function _inset(name) {
+        return parentToolInsets ? parentToolInsets[name] : 0
+    }
+
     QGCToolInsets {
         id:                     _totalToolInsets
-        leftEdgeTopInset:       parentToolInsets.leftEdgeTopInset
+        leftEdgeTopInset:       _inset("leftEdgeTopInset")
         leftEdgeCenterInset:    exampleRectangle.leftEdgeCenterInset
-        leftEdgeBottomInset:    parentToolInsets.leftEdgeBottomInset
-        rightEdgeTopInset:      parentToolInsets.rightEdgeTopInset
+        leftEdgeBottomInset:    _inset("leftEdgeBottomInset")
+        rightEdgeTopInset:      _inset("rightEdgeTopInset")
         rightEdgeCenterInset:   assistantPanel.rightEdgeCenterInset
         rightEdgeBottomInset:   parent.width - compassBackground.x
-        topEdgeLeftInset:       parentToolInsets.topEdgeLeftInset
+        topEdgeLeftInset:       _inset("topEdgeLeftInset")
         topEdgeCenterInset:     compassArrowIndicator.y + compassArrowIndicator.height
-        topEdgeRightInset:      parentToolInsets.topEdgeRightInset
-        bottomEdgeLeftInset:    parentToolInsets.bottomEdgeLeftInset
-        bottomEdgeCenterInset:  parentToolInsets.bottomEdgeCenterInset
+        topEdgeRightInset:      _inset("topEdgeRightInset")
+        bottomEdgeLeftInset:    _inset("bottomEdgeLeftInset")
+        bottomEdgeCenterInset:  _inset("bottomEdgeCenterInset")
         bottomEdgeRightInset:   parent.height - attitudeIndicator.y
     }
 
@@ -227,7 +235,7 @@ Item {
 
     Rectangle {
         id:                     attitudeIndicator
-        anchors.bottomMargin:   _toolsMargin + parentToolInsets.bottomEdgeRightInset
+        anchors.bottomMargin:   _toolsMargin + _inset("bottomEdgeRightInset")
         anchors.rightMargin:    _toolsMargin
         anchors.bottom:         parent.bottom
         anchors.right:          parent.right
@@ -253,7 +261,7 @@ Item {
         anchors.top:            parent.top
         anchors.bottom:         attitudeIndicator.top
         anchors.right:          parent.right
-        anchors.topMargin:      parentToolInsets.topEdgeRightInset + _toolsMargin
+        anchors.topMargin:      _inset("topEdgeRightInset") + _toolsMargin
         anchors.bottomMargin:   _toolsMargin
         anchors.rightMargin:    _toolsMargin
         parentToolInsets:       parentToolInsets
