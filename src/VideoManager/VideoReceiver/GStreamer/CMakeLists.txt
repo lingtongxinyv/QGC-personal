@@ -8,7 +8,7 @@ endif()
 # rtsp-server lib out of release builds. It is also optional: a define is emitted below only
 # when the SDK actually ships it.
 set(_qgc_gst_components Core Base Video App Rtsp)
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+if(NOT CMAKE_BUILD_TYPE STREQUAL "Release")
     list(APPEND _qgc_gst_components RtspServer)
 endif()
 if(LINUX)
@@ -34,7 +34,7 @@ target_compile_definitions(QGCGStreamer PUBLIC QGC_GST_STREAMING)
 # gstreamer-rtsp-server-1.0 is only requested in Debug (MockLink test server) and may be absent
 # on minimal installs. Its api_rtsp_server target is already aggregated into GStreamer::GStreamer
 # when found; just flag availability for MockVideoStreamServer.
-if(CMAKE_BUILD_TYPE STREQUAL "Debug" AND GStreamer_RtspServer_FOUND)
+if(NOT CMAKE_BUILD_TYPE STREQUAL "Release" AND GStreamer_RtspServer_FOUND)
     target_compile_definitions(QGCGStreamer PUBLIC QGC_GST_RTSP_SERVER)
 endif()
 
@@ -42,9 +42,8 @@ if(LINUX AND GStreamer_VERSION VERSION_LESS "1.28.0")
     target_compile_definitions(QGCGStreamer PUBLIC QGC_GST_ENABLE_LEGACY_PARSEBIN_CAPS_FILTER=1)
 endif()
 
-# MockVideoStreamServer feeds MockLink's synthetic video stream; MockLink is Debug-only
-# (see Comms/MockLink/CMakeLists.txt), so only compile it in Debug to keep it out of release.
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+# MockVideoStreamServer feeds MockLink's synthetic video stream.
+if(NOT CMAKE_BUILD_TYPE STREQUAL "Release")
     target_sources(QGCGStreamer
         PRIVATE
             MockVideoStreamServer.cc

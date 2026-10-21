@@ -27,9 +27,7 @@
 #endif
 #endif
 
-#ifdef QT_DEBUG
 #include "MockLink.h"
-#endif
 
 #include <QtCore/QApplicationStatic>
 #include <QtCore/QTimer>
@@ -153,11 +151,9 @@ bool LinkManager::createConnectedLink(SharedLinkConfigurationPtr &config)
     case LinkConfiguration::TypeLogReplay:
         link = std::make_shared<LogReplayLink>(config);
         break;
-#ifdef QT_DEBUG
     case LinkConfiguration::TypeMock:
         link = std::make_shared<MockLink>(config);
         break;
-#endif
     case LinkConfiguration::TypeLast:
     default:
         break;
@@ -414,11 +410,9 @@ void LinkManager::loadLinkConfigurationList()
             case LinkConfiguration::TypeLogReplay:
                 link = new LogReplayConfiguration(name);
                 break;
-#ifdef QT_DEBUG
             case LinkConfiguration::TypeMock:
                 link = new MockConfiguration(name);
                 break;
-#endif
             case LinkConfiguration::TypeLast:
             default:
                 break;
@@ -574,9 +568,7 @@ QStringList LinkManager::linkTypeStrings() const
     list += tr("UDP");
     list += tr("TCP");
     list += tr("Bluetooth");
-#ifdef QT_DEBUG
     list += tr("Mock Link");
-#endif
     list += tr("Log Replay");
 
     if (list.size() != static_cast<int>(LinkConfiguration::TypeLast)) {
