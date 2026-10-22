@@ -50,8 +50,7 @@ QString deobfuscate(const QString& stored)
     if (!stored.startsWith(QStringLiteral("obf1:"))) {
         return stored;
     }
-    const QByteArray b64 = QByteArray::fromLatin1(stored.mid(5).toLatin1());
-    const QByteArray xored = QByteArray::fromBase64(b64);
+    const QByteArray xored = QByteArray::fromBase64(stored.mid(5).toLatin1());
     const QByteArray key = QByteArray(kObfKey);
     QByteArray raw(xored.size(), Qt::Uninitialized);
     for (int i = 0; i < xored.size(); ++i) {
