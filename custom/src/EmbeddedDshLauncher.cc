@@ -15,11 +15,54 @@
 #include <QtCore/QSettings>
 #include <QtCore/QStandardPaths>
 #include <QtCore/QUrl>
+#include <QtCore/QByteArray>
 #include <QtNetwork/QNetworkAccessManager>
 #include <QtNetwork/QNetworkReply>
 #include <QtNetwork/QNetworkRequest>
 #include <QtNetwork/QHostAddress>
 #include <QtNetwork/QTcpServer>
+
+// ---------------------------------------------------------------------------
+// P2: API key obfuscation. XOR with a fixed key + base64. Not real encryption,
+// but prevents the raw key from appearing in plaintext in QSettings.
+// Future: replace with QKeychain or OS credential store.
+namespace {
+
+constexpr const char* kObfKey = "PX4-DSH-OBF-v1-Do-Not-Steal";
+
+QString obfuscate(const QString& plain)
+{
+    if (plain.isEmpty()) { return {}; }
+    const QByteArray raw = plain.toUtf8();
+    const QByteArray key = QByteArray(kObfKey);
+    QByteArray xored(raw.size(), Qt::Uninitialized);
+    for (int i = 0; i < raw.size(); ++i) {
+        xored[i] = raw[i] ^ key[i % key.size()];
+    }
+    return QStringLiteral("obf1:") + QString::fromLatin1(xored.toBase64());
+}
+
+QString deobfuscate(const QString& stored)
+{
+    if (stored.isEmpty()) { return {}; }
+    // Support legacy plaintext (upgrade path): anything without the "obf1:" prefix
+    // is returned as-is so existing installs keep working until next setApiKey call.
+    if (!stored.startsWith(QStringLiteral("obf1:"))) {
+        return stored;
+    }
+    const QByteArray b64 = QByteArray::fromLatin1(stored.mid(5).toLatin1());
+    const QByteArray xored = QByteArray::fromBase64(b64);
+    const QByteArray key = QByteArray(kObfKey);
+    QByteArray raw(xored.size(), Qt::Uninitialized);
+    for (int i = 0; i < xored.size(); ++i) {
+        raw[i] = xored[i] ^ key[i % key.size()];
+    }
+    return QString::fromUtf8(raw);
+}
+
+} // namespace
+
+// ---------------------------------------------------------------------------
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -96,7 +139,7 @@ EmbeddedDshLauncher::EmbeddedDshLauncher(QObject *parent)
     // DeepSeek API key (Q-D1 option a). Stored per-user in QSettings and injected
     // into the child environment. If empty, the child falls back to whatever
     // DEEPSEEK_API_KEY exists in the inherited (system) environment.
-    _apiKey = QSettings().value(QStringLiteral("EmbeddedDsh/ApiKey")).toString().trimmed();
+    _apiKey = deobfuscate(QSettings().value(QStringLiteral("EmbeddedDsh/ApiKey")).toString()).trimmed();
 
     if (!_enabled) {
         _setState(QStringLiteral("disabled"),
@@ -260,7 +303,7 @@ void EmbeddedDshLauncher::setApiKey(const QString &key)
     if (_apiKey.isEmpty()) {
         settings.remove(QStringLiteral("EmbeddedDsh/ApiKey"));
     } else {
-        settings.setValue(QStringLiteral("EmbeddedDsh/ApiKey"), _apiKey);
+        settings.setValue(QStringLiteral("EmbeddedDsh/ApiKey"), obfuscate(_apiKey));
     }
     emit apiKeySetChanged();
     qCDebug(EmbeddedDshLog) << "api key updated; stored:" << !_apiKey.isEmpty();

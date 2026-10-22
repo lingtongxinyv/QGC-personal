@@ -10,6 +10,7 @@
 #include <QtCore/QStandardPaths>
 #include <QtCore/QTimer>
 #include <QtCore/QUrl>
+#include <QtCore/QUrlQuery>
 #include <QtNetwork/QNetworkAccessManager>
 #include <QtNetwork/QNetworkReply>
 #include <QtNetwork/QNetworkRequest>
@@ -19,6 +20,19 @@ QGC_LOGGING_CATEGORY(AssistantClientLog, "Custom.AssistantClient")
 namespace {
 
 constexpr int kHealthIntervalMs = 15000;
+
+// P2: redact any ?token=... query param before logging URLs.
+QString redactUrl(const QString& url)
+{
+    QUrl u(url);
+    QUrlQuery q(u.query());
+    if (q.hasQueryItem(QStringLiteral("token"))) {
+        q.removeQueryItem(QStringLiteral("token"));
+        q.addQueryItem(QStringLiteral("token"), QStringLiteral("***"));
+        u.setQuery(q);
+    }
+    return u.toString();
+}
 
 QString normalizedBaseUrl()
 {
@@ -81,7 +95,7 @@ AssistantClient::AssistantClient(QObject *parent)
     , _nam(new QNetworkAccessManager(this))
     , _baseUrl(normalizedBaseUrl())
 {
-    qCDebug(AssistantClientLog) << "base url:" << _baseUrl;
+    qCDebug(AssistantClientLog) << "base url:" << redactUrl(_baseUrl);
 
     _loadToken();
 
@@ -122,7 +136,7 @@ void AssistantClient::setEndpoint(const QString &baseUrl, const QString &tokenFi
         return;
     }
 
-    qCDebug(AssistantClientLog) << "endpoint set to" << _baseUrl
+    qCDebug(AssistantClientLog) << "endpoint set to" << redactUrl(_baseUrl)
                                 << "token file:" << (_tokenFileOverride.isEmpty()
                                                      ? QStringLiteral("<defaults>")
                                                      : _tokenFileOverride);
