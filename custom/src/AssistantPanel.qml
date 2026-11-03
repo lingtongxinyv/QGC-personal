@@ -36,6 +36,17 @@ Rectangle {
     width: open ? _openWidth : _closedWidth
     color: qgcPal.windowShade
 
+    // Swallow wheel events that reach the panel root so scrolling the chat list
+    // or narration card never "leaks" through to the map behind us. Flickables
+    // inside this panel grab their own wheel events first (Qt Quick bubbles from
+    // the target Item up), so this handler only sees events non-Flickable areas
+    // (banner, title bar, API-key row, margins) didn't consume.
+    MouseArea {
+        anchors.fill: parent
+        acceptedButtons: Qt.NoButton
+        onWheel: function(wheel) { wheel.accepted = true; }
+    }
+
     /// Chat is usable unless the health probe hard-failed. A preset mismatch is only a
     /// warning: the server never validates the preset itself (local-dsh, 20261020T034816Z).
     readonly property bool _ready: px4Assistant.healthState === "ok" || px4Assistant.healthState === "warn"
@@ -379,7 +390,10 @@ Rectangle {
         Rectangle {
             Layout.fillWidth: true
             visible: root._narrationVisible
-            implicitHeight: narrationColumn.implicitHeight + root._margin * 1.6
+            // Cap the card so a long step list can never push the chat input row
+            // past the panel's bottom anchor (overflow painted over the compass
+            // cluster); overflow scrolls inside the card instead.
+            implicitHeight: narrationFlick.implicitHeight + root._margin * 1.6
             radius: ScreenTools.defaultBorderRadius
             color: qgcPal.windowShadeDark
             border.width: 1
@@ -390,11 +404,19 @@ Rectangle {
                 return qgcPal.text
             }
 
-            ColumnLayout {
-                id: narrationColumn
+            QGCFlickable {
+                id: narrationFlick
                 anchors.fill: parent
                 anchors.margins: root._margin * 0.8
-                spacing: root._margin * 0.5
+                contentWidth: width
+                contentHeight: narrationColumn.implicitHeight
+                implicitHeight: Math.min(narrationColumn.implicitHeight,
+                                         ScreenTools.defaultFontPixelHeight * 14)
+
+                ColumnLayout {
+                    id: narrationColumn
+                    width: narrationFlick.width
+                    spacing: root._margin * 0.5
 
                 RowLayout {
                     Layout.fillWidth: true
@@ -486,6 +508,7 @@ Rectangle {
                     text: root._narrationView ? qsTr("风险：%1").arg(root._narrationView.risk) : ""
                     font.pointSize: ScreenTools.smallFontPointSize
                     color: root._alertYellow
+                }
                 }
             }
         }
@@ -700,9 +723,9 @@ Rectangle {
             }
         }
 
-        RowLayout {
+        ColumnLayout {
             Layout.fillWidth: true
-            spacing:      _margin
+            spacing:      _margin * 0.5
             visible:      px4EmbeddedDsh.enabled && !px4EmbeddedDsh.apiKeySet
 
             QGCLabel {
@@ -712,17 +735,22 @@ Rectangle {
                 text: qsTr("内置助手需要 DeepSeek API 密钥。填入后自动重启，仅保存在本机。")
             }
 
-            TextField {
-                id: apiKeyField
-                Layout.preferredWidth: parent.width * 0.55
-                placeholderText: qsTr("sk-...")
-                echoMode: TextInput.Password
-                onAccepted: saveApiKey()
-            }
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: _margin
 
-            QGCButton {
-                text: qsTr("保存")
-                onClicked: saveApiKey()
+                QGCTextField {
+                    id: apiKeyField
+                    Layout.fillWidth: true
+                    placeholderText: qsTr("sk-...")
+                    echoMode: TextInput.Password
+                    onAccepted: saveApiKey()
+                }
+
+                QGCButton {
+                    text: qsTr("保存")
+                    onClicked: saveApiKey()
+                }
             }
 
             function saveApiKey() {
