@@ -39,11 +39,19 @@ SetupPage {
                     Layout.fillWidth: true
 
                     Repeater {
-                        model: QGroundControl.multiVehicleManager.activeVehicle.px4Firmware ?
-                                    (QGroundControl.multiVehicleManager.activeVehicle.multiRotor ?
-                                        [ "RC_MAP_AUX1", "RC_MAP_AUX2", "RC_MAP_PARAM1", "RC_MAP_PARAM2", "RC_MAP_PARAM3", "RC_MAP_PAY_SW"] :
-                                        [ "RC_MAP_FLAPS", "RC_MAP_AUX1", "RC_MAP_AUX2", "RC_MAP_PARAM1", "RC_MAP_PARAM2", "RC_MAP_PARAM3", "RC_MAP_PAY_SW"]) :
-                                    0
+                        // Only list the switch mappings this firmware actually exposes. Older PX4
+                        // builds have no RC_MAP_PAY_SW, and asking for a missing parameter raises
+                        // the app-wide "Parameters are missing from firmware" popup on every connect.
+                        model: {
+                            const vehicle = QGroundControl.multiVehicleManager.activeVehicle
+                            if (!vehicle || !vehicle.px4Firmware) {
+                                return []
+                            }
+                            const names = vehicle.multiRotor
+                                ? [ "RC_MAP_AUX1", "RC_MAP_AUX2", "RC_MAP_PARAM1", "RC_MAP_PARAM2", "RC_MAP_PARAM3", "RC_MAP_PAY_SW" ]
+                                : [ "RC_MAP_FLAPS", "RC_MAP_AUX1", "RC_MAP_AUX2", "RC_MAP_PARAM1", "RC_MAP_PARAM2", "RC_MAP_PARAM3", "RC_MAP_PAY_SW" ]
+                            return names.filter(function (name) { return controller.parameterExists(-1, name) })
+                        }
 
                         LabelledFactComboBox {
                             label: fact.shortDescription
