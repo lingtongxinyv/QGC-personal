@@ -98,6 +98,7 @@ private:
     void _sendFromList(int index);
     static bool _shouldRetry(MAV_CMD command);
     static bool _canBeDuplicated(MAV_CMD command);
+    static bool _shouldShowNoResponseError(MAV_CMD command);
     static int _responseCheckIntervalMSecs();
     static int _ackTimeoutMSecs();
     static QString _formatCommand(MAV_CMD command, float param1);

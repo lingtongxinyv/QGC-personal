@@ -242,6 +242,23 @@ bool MavCommandQueue::_canBeDuplicated(MAV_CMD command)
     }
 }
 
+bool MavCommandQueue::_shouldShowNoResponseError(MAV_CMD command)
+{
+    // Commands the vehicle is known to execute without ever sending a COMMAND_ACK.
+    // DO_MOTOR_TEST is fire-and-forget: the run time is passed in the command itself, so the
+    // motors spin (and stop) whether or not QGC hears back. Several firmwares (and PX4 builds
+    // derived from older MAVLink handling) simply drop the ack, which made every motor test
+    // end with a bogus "Vehicle did not respond to command" popup. It can also be duplicated
+    // (see _canBeDuplicated), so a slider drag would pop that message once per entry.
+    // Real command-level failures still surface through handleCommandAck/showCommandAckError.
+    switch (command) {
+    case MAV_CMD_DO_MOTOR_TEST:
+        return false;
+    default:
+        return true;
+    }
+}
+
 QString MavCommandQueue::_formatCommand(MAV_CMD command, float param1)
 {
     QString rawName = MissionCommandTree::instance()->rawName(command);
@@ -365,7 +382,7 @@ void MavCommandQueue::_sendFromList(int index)
         } else {
             emit commandResult(_vehicle->id(), commandEntry.targetCompId, commandEntry.command, MAV_RESULT_FAILED, MavCmdResultFailureNoResponseToCommand);
         }
-        if (commandEntry.showError) {
+        if (commandEntry.showError && _shouldShowNoResponseError(commandEntry.command)) {
             QGC::showAppMessage(tr("Vehicle did not respond to command: %1").arg(friendlyName));
         }
         return;
