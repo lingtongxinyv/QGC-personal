@@ -12,9 +12,9 @@ class QTimer;
 /**
  * AssistantClient
  *
- * Read-only HTTP/SSE client for the local DSH `px4-panel` plugin
- * (see coord/design/px4-chat-http.md). Exposed to QML as the context
- * property `px4Assistant` from CustomPlugin::createQmlApplicationEngine.
+ * Read-only HTTP/SSE client for the local DSH `px4-panel` plugin.
+ * Exposed to QML as the context property `px4Assistant` from
+ * CustomPlugin::createQmlApplicationEngine.
  *
  * Endpoints:
  *   GET  /px4-agent/health           -> liveness + preset probe (no token)

@@ -10,14 +10,14 @@
 class MultiVehicleManager;
 class Vehicle;
 
-/// Local deterministic alert rule engine (batch B5 phase 1).
+/// Local deterministic alert rule engine.
 ///
-/// Read-only by contract (acceptance E1): evaluates rules R1-R10 against the
-/// active Vehicle facts at 10 Hz. It performs zero MAVLink writes, zero
+/// Read-only by contract: evaluates rules R1-R10 against the active Vehicle
+/// facts at 10 Hz. It performs zero MAVLink writes, zero
 /// parameter writes, zero mode changes and zero mission writes; it only reads
 /// facts and listens to FENCE_BREACH notifications. Alert data stays inside
 /// this process (QML bindings only) - it never enters the 19390 relay or the
-/// Unity feed (acceptance E2).
+/// Unity feed.
 ///
 /// Output contract (design section 3): every alert is
 ///   { ruleId, level, code, detail }  with level 0=info 1=warn 2=critical.

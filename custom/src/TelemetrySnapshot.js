@@ -8,7 +8,7 @@
 //      in TelemetryWsRelay.cc). The non-loopback external bridge is still a
 //      separate work item pending an owner ruling.
 //
-// v2 fields (batch B5 phase 1, append-only - E3 acceptance):
+// v2 fields (append-only):
 //   - NEW top-level section "gcs": ground-station-side facts (link lost flag,
 //     RC RSSI, MAVLink loss rate, message counters). Read-only facts, NOT
 //     alerts - alert data must never enter the relay or Unity (E2).
@@ -17,13 +17,11 @@
 //     (vehicle.vehicle.* / vehicle.batteries.get(0)) while still supporting
 //     the legacy direct-property shape (vehicle.roll / vehicle.battery).
 //
-// Version policy (xiaoling v9 receipt, E3): additive fields do NOT bump
-// schema_version. The route-B Unity client hard-drops any frame whose
-// schema_version differs from its expectedSchemaVersion (=1), so the bump
-// to 2 broke exactly the consumers E3 promised to keep working.
+// Version policy: additive fields do NOT bump schema_version. The route-B
+// Unity client hard-drops any frame whose schema_version differs from its
+// expectedSchemaVersion (=1), so bumping to 2 broke those consumers.
 // schema_version is bumped ONLY on breaking changes (field removed, renamed,
-// or semantics changed), coordinated with a Unity client update in the same
-// batch.
+// or semantics changed), coordinated with a Unity client update.
 //
 // link_active semantics: false when no vehicle object exists; with a vehicle
 // it reflects the real link state (gcs.link_lost), defaulting to true while

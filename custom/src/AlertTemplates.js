@@ -1,5 +1,5 @@
 // ============================================================================
-// AlertTemplates.js - local (offline) narration templates for batch B5 phase 2
+// AlertTemplates.js - local (offline) narration templates
 //
 // Used when the local DSH is unreachable (status "offline") or the model reply
 // cannot be used. One template per AlertEngine rule code; every text is

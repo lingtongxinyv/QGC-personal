@@ -271,9 +271,9 @@ void AlertEngine::_applyDesired(const QString &ruleId, bool active, int level,
                 _closeHistoryEntry(state.historyEntry, nowMs);
                 state.historyEntry = QVariantMap();
             } else if (state.suppressedCount > 0) {
-                // Cooldown-throttled activation (xiaoling v9 P3-2): the alert
-                // was live but never announced, so without this row a short
-                // alert would vanish from the history entirely.
+                // Cooldown-throttled activation: the alert was live but never
+                // announced, so without this row a short alert would vanish
+                // from the history entirely.
                 QVariantMap entry;
                 entry["ruleId"]      = ruleId;
                 entry["code"]        = state.code;
@@ -400,8 +400,8 @@ void AlertEngine::_activeVehicleChanged(Vehicle *vehicle)
     emit activeAlertsChanged();
 
     if (vehicle) {
-        // Read-only tap for geofence breach notifications (acceptance E1: this
-        // only consumes an incoming MAVLink message, nothing is ever sent).
+        // Read-only tap for geofence breach notifications: this only consumes
+        // an incoming MAVLink message, nothing is ever sent.
         _vehicleMsgConnection = connect(vehicle, &Vehicle::mavlinkMessageReceived, this,
                                         [this](const mavlink_message_t &message) {
             // FENCE_STATUS is emitted by the vehicle on breach events; this is

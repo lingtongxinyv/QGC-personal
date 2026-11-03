@@ -38,7 +38,7 @@ QString normalizedBaseUrl()
 {
     QString url = qEnvironmentVariable("PX4_AGENT_BASE_URL");
     if (url.isEmpty()) {
-        // Headless DSH web profile is pinned to 19389 (see coord/design/px4-chat-http.md).
+        // Default to the embedded DSH instance on loopback port 19389.
         url = QStringLiteral("http://127.0.0.1:19389");
     }
     while (url.endsWith(QLatin1Char('/'))) {
@@ -63,16 +63,10 @@ QStringList tokenFileCandidates(const QString &instanceOverride)
         candidates << explicitFile;
     }
 
-    // Each DSH instance mints its own panel-token (randomBytes per DSH_HOME), so the
-    // token must come from the instance the panel talks to. The default base url is the
-    // headless instance on port 19389 whose DSH_HOME is dsh-px4-home (see
-    // coord/design/px4-chat-http.md), so that path is probed BEFORE the inherited
-    // DSH_HOME / %USERPROFILE%\.dsh ones -- a shell exporting the *desktop* DSH_HOME
-    // (C:\Users\16650\.dsh) would otherwise feed the desktop token to 19389 and get a
-    // 401 on every chat. Pointing the panel elsewhere (PX4_AGENT_BASE_URL)? Then also
-    // set PX4_AGENT_TOKEN_FILE to that instance's token.
-    candidates << QStringLiteral("D:/Apps/dsh-px4-home/px4-agent/panel-token");
-
+    // Each DSH instance mints its own panel-token, so the token must come from the
+    // instance the panel actually talks to. Probe DSH_HOME and the default per-user
+    // location. Pointing the panel elsewhere (PX4_AGENT_BASE_URL)? Then also set
+    // PX4_AGENT_TOKEN_FILE to that instance's token.
     const QString dshHome = qEnvironmentVariable("DSH_HOME");
     if (!dshHome.isEmpty()) {
         candidates << QDir(dshHome).filePath(QStringLiteral("px4-agent/panel-token"));

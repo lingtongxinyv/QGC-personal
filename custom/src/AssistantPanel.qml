@@ -8,18 +8,16 @@ import QGroundControl.Controls
 import "AlertText.js" as AlertText
 import "AlertTemplates.js" as AlertTemplates
 
-/// Right side dock of the Fly view: read-only Chinese chat with the local DSH
-/// PX4 assistant (persona 小云, preset px4-ta). Backed by the `px4Assistant`
-/// context property injected in CustomPlugin::createQmlApplicationEngine.
-///
-/// Channel contract: coord/design/px4-chat-http.md
+/// Right side dock of the Fly view: read-only chat with the local DSH
+/// PX4 assistant. Backed by the `px4Assistant` context property injected
+/// in CustomPlugin::createQmlApplicationEngine.
 Rectangle {
     id: root
 
     property var parentToolInsets
     property var mapControl
 
-    /// FlyViewCustomLayer (guidance registry + highlight overlay, B5 phase 3).
+    /// FlyViewCustomLayer (guidance registry + highlight overlay).
     /// Optional: when null the locate button is hidden.
     property var guidanceLayer: null
 

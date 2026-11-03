@@ -305,7 +305,7 @@ QQmlApplicationEngine* CustomPlugin::createQmlApplicationEngine(QObject* parent)
     // `customAlertEngine`. It never sends anything to the flight controller.
     _qmlEngine->rootContext()->setContextProperty(QStringLiteral("customAlertEngine"), _alertEngine);
 
-    // Phase-2 auto narration: alert -> Xiaoyun explanation (read-only).
+    // Phase-2 auto narration: alert -> assistant explanation (read-only).
     _qmlEngine->rootContext()->setContextProperty(QStringLiteral("px4AlertAssistant"), _alertAssistant);
     _qmlEngine->rootContext()->setContextProperty(QStringLiteral("px4AlertNarrator"), _alertNarrator);
 

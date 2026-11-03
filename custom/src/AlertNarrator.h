@@ -13,8 +13,8 @@ class AssistantClient;
 /**
  * AlertNarrator
  *
- * Batch B5 phase 2: turns a deterministic alert (AlertEngine, R1-R10) into a
- * read-only explanation from the local DSH assistant (persona: Xiaoyun).
+ * Turns a deterministic alert (AlertEngine, R1-R10) into a read-only
+ * explanation from the local DSH assistant.
  *
  * Chain: AlertEngine::alertRaised -> throttle/merge -> one chat turn -> parse
  * the structured reply -> `narrative` consumed by the panel.

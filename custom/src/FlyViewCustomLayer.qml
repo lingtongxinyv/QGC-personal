@@ -253,8 +253,7 @@ Item {
     }
 
     //-------------------------------------------------------------------------
-    //-- DSH 副驾驶 · 小云（只读答疑，右侧栏）
-    //   通道与协议：coord/design/px4-chat-http.md
+    //-- DSH assistant panel (read-only Q&A, right dock)
     AssistantPanel {
         id:                     assistantPanel
         visible:                !QGroundControl.videoManager.fullScreen
